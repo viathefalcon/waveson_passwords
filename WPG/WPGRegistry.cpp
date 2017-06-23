@@ -43,8 +43,9 @@ HRESULT WPGRegOpenKey(PHKEY phKey) {
 		HKEY hKeyCurrentUser = NULL;
 		LSTATUS lStatus = RegOpenCurrentUser( KEY_READ | KEY_WRITE, &hKeyCurrentUser );
 		if (lStatus == ERROR_SUCCESS){
-			// Open the actual key
-			lStatus = RegOpenKeyEx( hKeyCurrentUser, c_pszRegistryKeyPath, 0L, KEY_READ | KEY_WRITE, phKey );
+			// Open/create the actual key
+			DWORD dwDisposition = 0;
+			lStatus = RegCreateKeyEx( hKeyCurrentUser, c_pszRegistryKeyPath, 0, NULL, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, phKey, &dwDisposition );
 			RegCloseKey( hKeyCurrentUser );
 		}
 		hResult = (lStatus == ERROR_SUCCESS ? S_OK : HRESULT_FROM_WIN32( lStatus ));

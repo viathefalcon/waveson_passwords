@@ -418,7 +418,7 @@ HRESULT OnRefresh(HWND hDlg) {
 
 	// Allocate a buffer for the output
 	HWND hSlider = GetDlgItem( hDlg, IDC_SLIDER_OUTPUT );
-	SIZE_T cchPwd = SendMessage( hSlider, TBM_GETPOS, 0, 0 );
+	BYTE cchPwd = static_cast<BYTE>( SendMessage( hSlider, TBM_GETPOS, 0, 0 ) );
 	HANDLE hProcessHeap = GetProcessHeap( );
 	LPTSTR pszPwd = static_cast<LPTSTR>( HeapAlloc( hProcessHeap, HEAP_ZERO_MEMORY, sizeof( TCHAR ) * (cchPwd+1) ) );
 
@@ -431,7 +431,7 @@ HRESULT OnRefresh(HWND hDlg) {
 	// Use this to generate the password
 	caps = WPGPwdGen( pszPwd, cchPwd, caps, &cchPwd, pszAlphabet );
 	HRESULT hResult = (caps == WPGCapNONE) ? S_OK : E_FAIL;
-	if (caps == WPGCapNONE){
+	if (SUCCEEDED( hResult )){
 		// Set the output
 		SetWindowText( hOut, pszPwd );
 		if (IsDlgButtonChecked( hDlg, IDC_CHECK_AUTO_COPY )){
@@ -451,7 +451,7 @@ HRESULT OnClose(HWND hDlg) {
 
 	HKEY hKey = NULL;
 	HRESULT hResult = WPGRegOpenKey( &hKey );
-	if (SUCCEEDED( hResult )){	
+	if (SUCCEEDED( hResult )){
 		DWORD dwChecks = 1;
 		dwChecks |= (IsDlgButtonChecked( hDlg, IDC_CHECK_RDRAND ) ? c_dwRDRANDCheck : 0);
 		dwChecks |= (IsDlgButtonChecked( hDlg, IDC_CHECK_TPM ) ? c_dwTPMCheck : 0);
