@@ -1,5 +1,9 @@
 // Stdafx.h : include file for standard system include files, or project specific include files that are used frequently, but are changed infrequently
 //
+// Waveson Password Generator
+// Web: http://waveson.com/wpg/
+// Twitter: @waveson
+//
 // Author: Stephen Higgins
 // Blog: http://blog.viathefalcon.net/
 // Twitter: @viathefalcon

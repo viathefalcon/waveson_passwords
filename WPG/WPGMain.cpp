@@ -1,5 +1,9 @@
 // WPGMain.cpp : Defines the entry point for the application.
 //
+// Waveson Password Generator
+// Web: http://waveson.com/wpg/
+// Twitter: @waveson
+//
 // Author: Stephen Higgins
 // Blog: http://blog.viathefalcon.net/
 // Twitter: @viathefalcon
