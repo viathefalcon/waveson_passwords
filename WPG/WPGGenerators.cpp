@@ -196,21 +196,21 @@ BYTE TPMFill20(PVOID buffer, BYTE size) {
 
 BYTE RdRandFill(PVOID buffer, BYTE size) {
 
-	BYTE filled = 0;
+	SIZE_T filled = 0, cb = static_cast<SIZE_T>( size );
 	const SIZE_T delta = reinterpret_cast<SIZE_T>( buffer ) % sizeof( uint32_t );
 	if (delta){
 		uint32_t rdrand = 0;
 		if (rdrand_next( &rdrand )){
 			CopyMemory( buffer, &rdrand, delta );
-			filled += static_cast<BYTE>( delta );
+			filled += delta;
 		}else{
 			return 0;
 		}
 	}
 
-	const SIZE_T count = size / sizeof( uint32_t );
+	const SIZE_T count = cb / sizeof( uint32_t );
 	uint32_ptr next = reinterpret_cast<uint32_ptr>( reinterpret_cast<PBYTE>( buffer ) + delta );
-	for (BYTE s = 0; s < count; ++s){
+	for (SIZE_T s = 0; s < count; ++s){
 		if (rdrand_next( next )){
 			++next;
 			filled += sizeof( uint32_t );
@@ -219,17 +219,17 @@ BYTE RdRandFill(PVOID buffer, BYTE size) {
 		}
 	}
 
-	const BYTE rem = size - filled;
-	if (rem){
+	cb -= filled;
+	if (cb){
 		uint32_t rdrand = 0;
 		if (rdrand_next( &rdrand )){
-			CopyMemory( next, &rdrand, rem );
-			filled += rem;
+			CopyMemory( reinterpret_cast<PBYTE>( buffer ) + filled, &rdrand, cb );
+			filled += cb;
 		}else{
 			return 0;
 		}
 	}
-	return filled;
+	return static_cast<BYTE>( filled );
 }
 
 // Functions

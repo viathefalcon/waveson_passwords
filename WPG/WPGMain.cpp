@@ -131,23 +131,24 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 			break;
 
 		case WM_HSCROLL:
+		{
+			WORD w = wScroll;
 			switch (LOWORD( wParam )){
 				case SB_THUMBPOSITION:
 				case SB_THUMBTRACK:
-					// Check that the position has actually changed
-					if (wScroll == HIWORD( wParam )){
-						// Do nothing
-						;
-					}else{
-						wScroll = HIWORD( wParam );
-						PostMessage( hDlg, UWM_REFRESH, 0, 0 );
-					}
+					wScroll = HIWORD( wParam );
 					break;
 
-				// Do nothing
 				default:
+					wScroll = static_cast<WORD>( SendMessage( reinterpret_cast<HWND>( lParam ), TBM_GETPOS, 0, 0 ) );
 					break;
 			}
+
+			// Check that the position has actually changed
+			if (w != wScroll){
+				PostMessage( hDlg, UWM_REFRESH, 0, 0 );
+			}
+		}
 			break;
 
 		case WM_COMMAND:
