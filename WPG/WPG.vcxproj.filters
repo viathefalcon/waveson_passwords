@@ -30,6 +30,9 @@
     <ClInclude Include="WPGGenerators.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="WPGAboutEtc.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Stdafx.cpp">
@@ -44,9 +47,15 @@
     <ClCompile Include="WPGGenerators.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="WPGAboutEtc.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Image Include="Waveson.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="Waveson.bmp">
       <Filter>Resource Files</Filter>
     </Image>
   </ItemGroup>

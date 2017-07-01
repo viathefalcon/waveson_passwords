@@ -16,6 +16,7 @@
 #include "Stdafx.h"
 
 // Local Project Headers
+#include "WPGAboutEtc.h"
 #include "WPGGenerators.h"
 #include "WPGRegistry.h"
 
@@ -44,6 +45,18 @@ const DWORD c_dwRDRANDCheck = 0x80000000;
 const DWORD c_dwTPMCheck = 0x00800000;
 const DWORD c_dwAutoCopyCheck = 0x00008000;
 const DWORD c_dwDefaultChecks = (c_dwRDRANDCheck | c_dwTPMCheck);
+
+// Types
+//
+
+typedef struct _UIState {
+
+	WPGCaps wpgCaps;
+
+	DWORD dwTooltips;
+	HWND* phTooltips;
+
+} UIState, *UIStatePtr;
 
 // Globals
 //
@@ -81,6 +94,9 @@ LPTSTR NonDefaultAlphabet(HWND);
 // Retrieves and sets the given error message
 VOID SetErrorMsg(HWND, WPGCaps);
 
+// Scales the given input to the horizontal DPI
+INT WPGScaleX(INT);
+
 // Functions
 //
 
@@ -90,32 +106,37 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
 	UNREFERENCED_PARAMETER( hPrevInstance );
 	UNREFERENCED_PARAMETER( nCmdShow );
 
-	// Load the icon
-	g_hIcon = reinterpret_cast<HICON>( LoadImage( hInstance, MAKEINTRESOURCE( IDI_WAVESON ), IMAGE_ICON, GetSystemMetrics( SM_CXSMICON ), GetSystemMetrics( SM_CYSMICON ), 0 ) );
-
 	// Initialise the Common Controls Library; ensure that the progress control is available
 	INITCOMMONCONTROLSEX icex = { 0L };
-	icex.dwICC = ICC_BAR_CLASSES;
+	icex.dwICC = ICC_BAR_CLASSES | ICC_LINK_CLASS;
 	icex.dwSize = static_cast<DWORD>( sizeof( INITCOMMONCONTROLSEX ) );
 	if (!InitCommonControlsEx( &icex )){
 		MessageBox( HWND_DESKTOP, TEXT( "Failed to initialise common controls. Aborting." ), TEXT( "Error" ), MB_OK | MB_ICONERROR );
 		return 1;
 	}
 
-	// Register the message
-	g_uwmTaskbarButtonCreated = RegisterWindowMessage( L"TaskbarButtonCreated" ); 
+	// Initialise COM
+	int result = 1;
+	HRESULT hResult = CoInitializeEx( NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE );
+	if (SUCCEEDED( hResult )){
+		// Load the icon
+		g_hIcon = reinterpret_cast<HICON>( LoadImage( hInstance, MAKEINTRESOURCE( IDI_WAVESON ), IMAGE_ICON, GetSystemMetrics( SM_CXSMICON ), GetSystemMetrics( SM_CYSMICON ), 0 ) );
 
-	// Display the dialog box
-	DialogBoxParam( hInstance, MAKEINTRESOURCE( IDD_MAIN ), HWND_DESKTOP, MainDialogProc, 0 );
+		// Register the message
+		g_uwmTaskbarButtonCreated = RegisterWindowMessage( L"TaskbarButtonCreated" ); 
 
-	// Cleanup, return
-	if (g_hIcon){
-		DestroyIcon( g_hIcon );
+		// Display the dialog box
+		result = DialogBoxParam( hInstance, MAKEINTRESOURCE( IDD_MAIN ), HWND_DESKTOP, MainDialogProc, 0 );
+
+		// Cleanup, return
+		if (g_hIcon){
+			DestroyIcon( g_hIcon );
+		}
+		CoUninitialize( );
 	}
-	return 0;
+	return result;
 }
 
-// Gives the callback procedure for the main dialog box
 INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 
 	static UINT uTimer = 0;
@@ -217,6 +238,26 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 			}
 			break;
 
+		case WM_NOTIFY:
+		{
+			LPNMHDR lpNmHdr = reinterpret_cast<LPNMHDR>( lParam );
+			switch (lpNmHdr->code){
+				case NM_CLICK:
+				case NM_RETURN:
+				{
+					HINSTANCE hInstance = reinterpret_cast<HINSTANCE>( GetWindowLongPtr( hDlg, GWLP_HINSTANCE ) );
+					DialogBox( hInstance, MAKEINTRESOURCE( IDD_ABOUT ), hDlg, AboutDialogProc );
+				}
+					bResult = TRUE;
+					break;
+
+				default:
+					bResult = FALSE;
+					break;
+			}
+		}
+			break;
+
 		case UWM_REFRESH:
 			OnRefresh( hDlg );
 			break;
@@ -230,28 +271,23 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 	return bResult;
 }
 
-LPTSTR LoadStringProcessHeap(HINSTANCE hInstance, UINT uID) {
-
-	LPTSTR pszTmp = NULL;
-	const int nLength = LoadString( hInstance, uID, reinterpret_cast<LPTSTR>( &pszTmp ), 0 ); // On its own, this just returns a pointer to the entire contents of the string table..?
-	if (!nLength){
-		return NULL;
-	}
-
-	// Allocate a null-terminated buffer and copy into it
-	LPTSTR pszText = static_cast<LPWSTR>( PH_ALLOC( sizeof( TCHAR ) * (nLength+1) ) );
-	StringCchCopy( pszText, (nLength + 1), pszTmp );
-	return pszText;
-}
-
 HRESULT OnCreateTooltips(HWND hDlg) {
+
+	// Use the dialog's width as the maximum width
+	RECT r = { 0 };
+	GetWindowRect( hDlg, &r );
+	const LPARAM lWidth = static_cast<LPARAM>( WPGScaleX( r.right - r.left ) );
 
 	const int nDlgItems[] = { IDC_CHECK_RDRAND, IDC_CHECK_TPM, IDC_EDIT_INPUT, IDC_SLIDER_OUTPUT, IDC_CHECK_AUTO_COPY };
 	const UINT uStringIDs[] = { IDS_CHECK_RDRAND, IDS_CHECK_TPM, IDS_EDIT_INPUT, IDS_SLIDER_OUTPUT, IDS_CHECK_AUTO_COPY };
+	unsigned count = min( ARRAYSIZE( nDlgItems ), ARRAYSIZE( uStringIDs ) );
+
+	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
+	uiStatePtr->dwTooltips = static_cast<DWORD>( count );
+	uiStatePtr->phTooltips = reinterpret_cast<HWND*>( PH_ALLOC( sizeof( HWND ) * count ) );
 
 	HINSTANCE hInstance = reinterpret_cast<HINSTANCE>( GetWindowLongPtr( hDlg, GWLP_HINSTANCE ) );
-	unsigned int count = min( ARRAYSIZE( nDlgItems ), ARRAYSIZE( uStringIDs ) );
-	for (decltype(count) i = 0; i < count; ++i){
+	for (unsigned i = 0; i < count; ++i){
 		HWND hItem = GetDlgItem( hDlg, nDlgItems[i] );
 		LPTSTR pszText = LoadStringProcessHeap( hInstance, uStringIDs[i] );
 		if (!pszText){
@@ -272,6 +308,9 @@ HRESULT OnCreateTooltips(HWND hDlg) {
 		toolInfo.lpszText = pszText;
 		SendMessage( hTooltip, TTM_ADDTOOL, 0, reinterpret_cast<LPARAM>( &toolInfo ) );
 		PH_FREE( pszText );
+
+		SendMessage( hTooltip, TTM_SETMAXTIPWIDTH, 0, lWidth );
+		*(uiStatePtr->phTooltips + i) = hTooltip;
 	}
 	return S_OK;
 }
@@ -319,7 +358,6 @@ HRESULT OnInitDialog(HWND hDlg) {
 		uCheckTPM = (dwChecks & c_dwTPMCheck) ? BST_CHECKED : BST_UNCHECKED;
 		CheckDlgButton( hDlg, IDC_CHECK_TPM, uCheckTPM );
 	}
-	SetWindowLongPtr( hDlg, GWLP_USERDATA, static_cast<LONG_PTR>( caps ) );
 
 	const UINT uCheck = (dwChecks & c_dwAutoCopyCheck) ? BST_CHECKED : BST_UNCHECKED;
 	CheckDlgButton( hDlg, IDC_CHECK_AUTO_COPY, uCheck );
@@ -332,11 +370,17 @@ HRESULT OnInitDialog(HWND hDlg) {
 	}else{
 		OnReset( hDlg );
 	}
+
 	const BOOL bEnable = (uCheckRDRAND == BST_CHECKED) || (uCheckTPM == BST_CHECKED);
 	if (bEnable){
 		PostMessage( hDlg, UWM_REFRESH, 0, 0 );
 	}
 	EnableWindow( GetDlgItem( hDlg, IDC_BUTTON_REFRESH ), bEnable );
+
+	// Initialise the UI state
+	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( PH_ALLOC( sizeof( UIState ) ) );
+	uiStatePtr->wpgCaps = caps;
+	SetWindowLongPtr( hDlg, GWLP_USERDATA, reinterpret_cast<LONG_PTR>( uiStatePtr ) );
 	return OnCreateTooltips( hDlg );
 }
 
@@ -406,7 +450,8 @@ HRESULT OnCopy(HWND hDlg) {
 HRESULT OnRefresh(HWND hDlg) {
 
 	// Find the intersection between the available generators and the ones the user has selected
-	WPGCaps caps = static_cast<WPGCaps>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
+	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
+	WPGCaps caps = uiStatePtr->wpgCaps;
 	if (!IsDlgButtonChecked( hDlg, IDC_CHECK_RDRAND )){
 		caps &= ~WPGCapRDRAND;
 	}
@@ -477,6 +522,15 @@ HRESULT OnClose(HWND hDlg) {
 
 		WPGRegCloseKey( hKey );
 	}
+
+	// Cleanup the UI state
+	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
+	if (uiStatePtr){
+		for (DWORD dw = 0; dw < uiStatePtr->dwTooltips; ++dw){
+			DestroyWindow( *(uiStatePtr->phTooltips + dw) );
+		}
+		PH_FREE( reinterpret_cast<LPVOID>( uiStatePtr ) );
+	}
 	return S_OK;
 }
 
@@ -527,4 +581,16 @@ VOID SetErrorMsg(HWND hDlg, WPGCaps caps){
 		SetWindowText( GetDlgItem( hDlg, IDC_EDIT_OUTPUT ), pszString );
 		PH_FREE( pszString );
 	}
+}
+
+INT WPGScaleX(INT x) {
+
+	static const INT c_nBaseDPI = 96;
+
+	HDC hdc = GetDC( NULL );
+	const INT dpi = (hdc) ? GetDeviceCaps( hdc, LOGPIXELSX ) : c_nBaseDPI;
+	if (hdc) {
+		ReleaseDC( NULL, hdc );
+	}
+	return MulDiv( x, c_nBaseDPI, dpi );
 }
