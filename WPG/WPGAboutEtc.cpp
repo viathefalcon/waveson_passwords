@@ -33,7 +33,7 @@ LPTSTR LoadStringProcessHeap(HINSTANCE hInstance, UINT uID) {
 	}
 
 	// Allocate a null-terminated buffer and copy into it
-	LPTSTR pszText = static_cast<LPWSTR>( PH_ALLOC( sizeof( TCHAR ) * (nLength+1) ) );
+	LPTSTR pszText = static_cast<LPTSTR>( PH_ALLOC( sizeof( TCHAR ) * (nLength+1) ) );
 	StringCchCopy( pszText, (nLength + 1), pszTmp );
 	return pszText;
 }
@@ -82,6 +82,7 @@ INT_PTR CALLBACK AboutDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 							LPTSTR pszUrl = reinterpret_cast<LPTSTR>( PH_ALLOC( dwSize + sizeof( TCHAR ) ) ); // +1 for the null terminator
 							CryptStringToBinary( pszBase64, 0, CRYPT_STRING_BASE64, reinterpret_cast<BYTE*>( pszUrl ), &dwSize, NULL, NULL );
 #if defined (_DEBUG)
+							OutputDebugString( TEXT( "Going to open: " ) );
 							OutputDebugString( pszUrl );
 							OutputDebugString( TEXT( "\x0A" ) );
 #endif

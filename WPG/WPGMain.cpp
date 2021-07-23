@@ -44,7 +44,8 @@ const UINT c_uTimerElapseMinimum = 1U;
 const DWORD c_dwRDRANDCheck = 0x80000000;
 const DWORD c_dwTPMCheck = 0x00800000;
 const DWORD c_dwAutoCopyCheck = 0x00008000;
-const DWORD c_dwDefaultChecks = (c_dwRDRANDCheck | c_dwTPMCheck);
+const DWORD c_dwDuplicatesCheck = 0x00000800;
+const DWORD c_dwDefaultChecks = (c_dwRDRANDCheck | c_dwTPMCheck | c_dwDuplicatesCheck);
 
 // Types
 //
@@ -96,6 +97,9 @@ VOID SetErrorMsg(HWND, WPGCaps);
 
 // Scales the given input to the horizontal DPI
 INT WPGScaleX(INT);
+
+// Automatically ticks the "Allow duplicates.." checkbox if the desired password length is greater than the input alphabet
+VOID AutoCheckDuplicatesAndRefresh(HWND);
 
 // Functions
 //
@@ -157,7 +161,7 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 
 		case WM_HSCROLL:
 		{
-			WORD w = wScroll;
+			const WORD w = wScroll;
 			switch (LOWORD( wParam )){
 				case SB_THUMBPOSITION:
 				case SB_THUMBTRACK:
@@ -171,7 +175,13 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 
 			// Check that the position has actually changed
 			if (w != wScroll){
-				PostMessage( hDlg, UWM_REFRESH, 0, 0 );
+#if defined (_DEBUG)
+				const size_t cchBuf = 256;
+				TCHAR szBuf[cchBuf] = { 0 };
+				StringCchPrintf( szBuf, cchBuf, TEXT( "Slider changed to %d\x0A" ), (int) wScroll );
+				OutputDebugString( szBuf );
+#endif
+				AutoCheckDuplicatesAndRefresh( hDlg );
 			}
 		}
 			break;
@@ -193,10 +203,26 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 					bResult = SUCCEEDED( OnCopy( hDlg ) );
 					break;
 
+				case IDC_CHECK_ALLOW_DUPLICATES:
 				case IDC_CHECK_RDRAND:
 				case IDC_CHECK_TPM:
 					if (HIWORD( wParam ) == BN_CLICKED){
 						PostMessage( hDlg, UWM_REFRESH, 0, 0 );
+					}
+					break;
+
+				case IDC_EDIT_INPUT:
+					// If the contents of the input have changed,
+					// then check whether the 'Allow duplicates...'
+					// checkbox should/should not be ticked
+					switch (HIWORD( wParam )){
+						case EN_CHANGE:
+							AutoCheckDuplicatesAndRefresh( hDlg );
+							break;
+
+						default:
+							bResult = FALSE;
+							break;
 					}
 					break;
 
@@ -278,9 +304,9 @@ HRESULT OnCreateTooltips(HWND hDlg) {
 	GetWindowRect( hDlg, &r );
 	const LPARAM lWidth = static_cast<LPARAM>( WPGScaleX( r.right - r.left ) );
 
-	const int nDlgItems[] = { IDC_CHECK_RDRAND, IDC_CHECK_TPM, IDC_EDIT_INPUT, IDC_SLIDER_OUTPUT, IDC_CHECK_AUTO_COPY };
-	const UINT uStringIDs[] = { IDS_CHECK_RDRAND, IDS_CHECK_TPM, IDS_EDIT_INPUT, IDS_SLIDER_OUTPUT, IDS_CHECK_AUTO_COPY };
-	unsigned count = min( ARRAYSIZE( nDlgItems ), ARRAYSIZE( uStringIDs ) );
+	const int nDlgItems[] = { IDC_CHECK_RDRAND, IDC_CHECK_TPM, IDC_EDIT_INPUT, IDC_SLIDER_OUTPUT, IDC_CHECK_AUTO_COPY, IDC_CHECK_ALLOW_DUPLICATES };
+	const UINT uStringIDs[] = { IDS_CHECK_RDRAND, IDS_CHECK_TPM, IDS_EDIT_INPUT, IDS_SLIDER_OUTPUT, IDS_CHECK_AUTO_COPY, IDS_CHECK_ALLOW_DUPLICATES };
+	const unsigned count = min( ARRAYSIZE( nDlgItems ), ARRAYSIZE( uStringIDs ) );
 
 	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
 	uiStatePtr->dwTooltips = static_cast<DWORD>( count );
@@ -358,9 +384,16 @@ HRESULT OnInitDialog(HWND hDlg) {
 		uCheckTPM = (dwChecks & c_dwTPMCheck) ? BST_CHECKED : BST_UNCHECKED;
 		CheckDlgButton( hDlg, IDC_CHECK_TPM, uCheckTPM );
 	}
-
-	const UINT uCheck = (dwChecks & c_dwAutoCopyCheck) ? BST_CHECKED : BST_UNCHECKED;
-	CheckDlgButton( hDlg, IDC_CHECK_AUTO_COPY, uCheck );
+	CheckDlgButton(
+		hDlg,
+		IDC_CHECK_AUTO_COPY,
+		(dwChecks & c_dwAutoCopyCheck) ? BST_CHECKED : BST_UNCHECKED
+	);
+	CheckDlgButton(
+		hDlg,
+		IDC_CHECK_ALLOW_DUPLICATES,
+		(dwChecks & c_dwDuplicatesCheck) ? BST_CHECKED : BST_UNCHECKED
+	);
 
 	// Seed the input from registry, above, (or resources) and do the initial 'refresh'
 	if (pszAlphabet){
@@ -449,6 +482,10 @@ HRESULT OnCopy(HWND hDlg) {
 
 HRESULT OnRefresh(HWND hDlg) {
 
+	// Setup
+	HWND hInput = GetDlgItem( hDlg, IDC_EDIT_INPUT );
+	const int cchAlphabet = 1 + GetWindowTextLength( hInput );
+
 	// Find the intersection between the available generators and the ones the user has selected
 	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
 	WPGCaps caps = uiStatePtr->wpgCaps;
@@ -461,7 +498,7 @@ HRESULT OnRefresh(HWND hDlg) {
 
 	// Look for an early out
 	HWND hOut = GetDlgItem( hDlg, IDC_EDIT_OUTPUT );
-	if (caps == WPGCapNONE){
+	if ((caps == WPGCapNONE) || (cchAlphabet == 1)){
 		SetWindowText( hOut, TEXT( "" ) );
 		return S_OK;
 	}
@@ -473,14 +510,13 @@ HRESULT OnRefresh(HWND hDlg) {
 	LPTSTR pszPwd = static_cast<LPTSTR>( HeapAlloc( hProcessHeap, HEAP_ZERO_MEMORY, sizeof( TCHAR ) * (cchPwd+1) ) );
 
 	// Get a copy of the input alphabet
-	HWND hInput = GetDlgItem( hDlg, IDC_EDIT_INPUT );
-	const int cchAlphabet = 1 + GetWindowTextLength( hInput );
 	LPTSTR pszAlphabet = static_cast<LPTSTR>( HeapAlloc( hProcessHeap, HEAP_ZERO_MEMORY, sizeof( TCHAR ) * (cchAlphabet+1) ) );
 	GetWindowText( hInput, pszAlphabet, cchAlphabet );
 
 	// Use this to generate the password
-	caps = WPGPwdGen( pszPwd, cchPwd, caps, &cchPwd, pszAlphabet );
-	HRESULT hResult = (caps == WPGCapNONE) ? S_OK : E_FAIL;
+	const BOOL fDuplicatesAllowed = IsDlgButtonChecked( hDlg, IDC_CHECK_ALLOW_DUPLICATES );
+	const WPGCaps wpgCapsFailed = WPGPwdGen( pszPwd, cchPwd, caps, &cchPwd, pszAlphabet, fDuplicatesAllowed );
+	HRESULT hResult = (wpgCapsFailed == WPGCapNONE) ? S_OK : E_FAIL;
 	if (SUCCEEDED( hResult )){
 		// Set the output
 		SetWindowText( hOut, pszPwd );
@@ -488,7 +524,7 @@ HRESULT OnRefresh(HWND hDlg) {
 			hResult = OnCopy( hDlg );
 		}
 	}else{
-		SetErrorMsg( hDlg, caps );
+		SetErrorMsg( hDlg, wpgCapsFailed );
 	}
 
 	// Cleanup and return
@@ -506,6 +542,7 @@ HRESULT OnClose(HWND hDlg) {
 		dwChecks |= (IsDlgButtonChecked( hDlg, IDC_CHECK_RDRAND ) ? c_dwRDRANDCheck : 0);
 		dwChecks |= (IsDlgButtonChecked( hDlg, IDC_CHECK_TPM ) ? c_dwTPMCheck : 0);
 		dwChecks |= (IsDlgButtonChecked( hDlg, IDC_CHECK_AUTO_COPY ) ? c_dwAutoCopyCheck : 0);
+		dwChecks |= (IsDlgButtonChecked( hDlg, IDC_CHECK_ALLOW_DUPLICATES ) ? c_dwDuplicatesCheck : 0);
 		WPGRegSetDWORD( hKey, WPGRegChecks, dwChecks );
 
 		LPTSTR pszAlphabet = NonDefaultAlphabet( hDlg );
@@ -593,4 +630,28 @@ INT WPGScaleX(INT x) {
 		ReleaseDC( NULL, hdc );
 	}
 	return MulDiv( x, c_nBaseDPI, dpi );
+}
+
+VOID AutoCheckDuplicatesAndRefresh(HWND hDlg) {
+
+	// Retrieve the respective sizes of the input alphabet and the desired output password
+	HWND hInput = GetDlgItem( hDlg, IDC_EDIT_INPUT );
+	const int cchAlphabet = GetWindowTextLength( hInput );
+	HWND hSlider = GetDlgItem( hDlg, IDC_SLIDER_OUTPUT );
+	const int cchPwd = static_cast<int>( SendMessage( hSlider, TBM_GETPOS, 0, 0 ) );
+
+	// If the latter is greater than the former, then duplicates MUST be allowed, so..
+	BOOL fEnabled = TRUE;
+	if (cchPwd > cchAlphabet){
+		CheckDlgButton(
+			hDlg,
+			IDC_CHECK_ALLOW_DUPLICATES,
+			BST_CHECKED
+		);
+		fEnabled = FALSE;
+	}
+	EnableWindow( GetDlgItem( hDlg, IDC_CHECK_ALLOW_DUPLICATES ), fEnabled );
+
+	// Refresh the generated password with the new configuration
+	PostMessage( hDlg, UWM_REFRESH, 0, 0 );
 }
