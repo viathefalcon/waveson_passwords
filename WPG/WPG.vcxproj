@@ -57,6 +57,8 @@
       <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
       <AdditionalIncludeDirectories>..\..\rdrand_msvc_2010\RdRandStatic;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeTypeInfo>
+      </RuntimeTypeInfo>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -77,6 +79,8 @@
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <SDLCheck>true</SDLCheck>
       <AdditionalIncludeDirectories>..\..\rdrand_msvc_2010\RdRandStatic;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeTypeInfo>
+      </RuntimeTypeInfo>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -99,6 +103,7 @@
     <ClInclude Include="WPGRegistry.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="BitOps.cpp" />
     <ClCompile Include="WPGAboutEtc.cpp" />
     <ClCompile Include="WPGGenerators.cpp" />
     <ClCompile Include="Stdafx.cpp">

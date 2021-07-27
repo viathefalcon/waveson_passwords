@@ -63,15 +63,20 @@ enum {
 	TPM2_CC_GET_RANDOM	= 0x017B,
 };
 
+// Forward Declarations
+//
+
+SIZE_T RdRandFill(PVOID, const SIZE_T);
+
 // Classes
 //
 
-class pwd_generator_t {
+class rng_t {
 public:
 	typedef unsigned char size_type;
 
-	pwd_generator_t(void) = default;
-	virtual ~pwd_generator_t(void) = default;
+	rng_t(void) = default;
+	virtual ~rng_t(void) = default;
 
 	virtual operator WPGCap(void) const = 0;
 	virtual operator bool(void) const = 0;
@@ -80,15 +85,15 @@ public:
 };
 
 template <WPGCap _cap>
-class cap_generator_t: public pwd_generator_t {
+class cap_rng_t: public rng_t {
 public:
 	const WPGCap cap = _cap;
 
-	cap_generator_t(void) = default;
-	cap_generator_t(const cap_generator_t&) = delete;
-	virtual ~cap_generator_t(void) = default;
+	cap_rng_t(void) = default;
+	cap_rng_t(const cap_rng_t&) = delete;
+	virtual ~cap_rng_t(void) = default;
 
-	cap_generator_t& operator=(const cap_generator_t&) = delete;
+	cap_rng_t& operator=(const cap_rng_t&) = delete;
 
 	operator WPGCap(void) const {
 		return cap;
@@ -99,58 +104,21 @@ public:
 	}
 };
 
-class rdrand_generator_t: public cap_generator_t<WPGCapRDRAND> {
+class rdrand_rng_t: public cap_rng_t<WPGCapRDRAND> {
 public:
-	operator bool(void) const;
-	size_type fill(void*, size_type);
+	operator bool(void) const {
+		return ::rdrand_supported( );
+	}
+
+	size_type fill(void* buffer, rdrand_rng_t::size_type size) {
+		return static_cast<size_type>( ::RdRandFill( buffer, size ) );
+	}
 };
 
-rdrand_generator_t::operator bool(void) const {
-	return ::rdrand_supported( );
-}
-
-rdrand_generator_t::size_type rdrand_generator_t::fill(void* buffer, rdrand_generator_t::size_type size) {
-
-	decltype(size) filled = 0;
-	const auto delta = reinterpret_cast<size_t>( buffer ) % sizeof( uint32_t );
-	if (delta){
-		uint32_t rdrand = 0;
-		if (::rdrand_next( &rdrand )){
-			std::memcpy( buffer, &rdrand, delta );
-			filled += static_cast<decltype(filled)>( delta );
-		}else{
-			return 0;
-		}
-	}
-
-	const auto count = size / sizeof( uint32_t );
-	auto next = reinterpret_cast<uint32_ptr>( reinterpret_cast<unsigned char*>( buffer ) + delta );
-	for (size_type s = 0; s < count; ++s){
-		if (::rdrand_next( next )){
-			++next;
-			filled += sizeof( uint32_t );
-		}else{
-			return 0;
-		}
-	}
-
-	const auto rem = size - filled;
-	if (rem){
-		uint32_t rdrand = 0;
-		if (::rdrand_next( &rdrand )){
-			std::memcpy( next, &rdrand, rem );
-			filled += rem;
-		}else{
-			return 0;
-		}
-	}
-	return filled;
-}
-
-class tpm12_generator_t: public cap_generator_t<WPGCapTPM12> {
+class tpm12_rng_t: public cap_rng_t<WPGCapTPM12> {
 public:
-	tpm12_generator_t(void);
-	virtual ~tpm12_generator_t(void);
+	tpm12_rng_t(void);
+	virtual ~tpm12_rng_t(void);
 
 	operator bool(void) const {
 		return (m_hContext != NULL);
@@ -162,7 +130,7 @@ private:
 	TBS_HCONTEXT m_hContext;
 };
 
-tpm12_generator_t::tpm12_generator_t(void): m_hContext( NULL ) {
+tpm12_rng_t::tpm12_rng_t(void): m_hContext( NULL ) {
 
 	TBS_CONTEXT_PARAMS contextParams = { 0 };
 	contextParams.version = TBS_CONTEXT_VERSION_ONE;
@@ -172,14 +140,14 @@ tpm12_generator_t::tpm12_generator_t(void): m_hContext( NULL ) {
 	}
 }
 
-tpm12_generator_t::~tpm12_generator_t(void) {
+tpm12_rng_t::~tpm12_rng_t(void) {
 
 	if (m_hContext){
 		::Tbsip_Context_Close( m_hContext );
 	}
 }
 
-tpm12_generator_t::size_type tpm12_generator_t::fill(void* buffer, tpm12_generator_t::size_type size) {
+tpm12_rng_t::size_type tpm12_rng_t::fill(void* buffer, tpm12_rng_t::size_type size) {
 
 	BYTE bCmd[] = {
 		0x00, 0xc1,					// TPM_TAG_RQU_COMMAND
@@ -221,10 +189,10 @@ tpm12_generator_t::size_type tpm12_generator_t::fill(void* buffer, tpm12_generat
 	return result;
 }
 
-class tpm20_generator_t: public cap_generator_t<WPGCapTPM20> {
+class tpm20_rng_t: public cap_rng_t<WPGCapTPM20> {
 public:
-	tpm20_generator_t(void);
-	~tpm20_generator_t(void);
+	tpm20_rng_t(void);
+	~tpm20_rng_t(void);
 
 	operator bool(void) const {
 		return (m_hContext != NULL);
@@ -236,7 +204,7 @@ private:
 	TBS_HCONTEXT m_hContext;
 };
 
-tpm20_generator_t::tpm20_generator_t(void): m_hContext( NULL ) {
+tpm20_rng_t::tpm20_rng_t(void): m_hContext( NULL ) {
 
 	TBS_CONTEXT_PARAMS2 contextParams = { 0 };
 	contextParams.version = TBS_CONTEXT_VERSION_TWO;
@@ -248,14 +216,14 @@ tpm20_generator_t::tpm20_generator_t(void): m_hContext( NULL ) {
 	}
 }
 
-tpm20_generator_t::~tpm20_generator_t(void) {
+tpm20_rng_t::~tpm20_rng_t(void) {
 
 	if (m_hContext){
 		::Tbsip_Context_Close( m_hContext );
 	}
 }
 
-tpm20_generator_t::size_type tpm20_generator_t::fill(void* buffer, tpm20_generator_t::size_type size) {
+tpm20_rng_t::size_type tpm20_rng_t::fill(void* buffer, tpm20_rng_t::size_type size) {
 
 #pragma pack(push,1)
 	typedef struct _tpm20_get_random_t {
@@ -294,16 +262,6 @@ tpm20_generator_t::size_type tpm20_generator_t::fill(void* buffer, tpm20_generat
 			if (rc == 0){
 				CopyMemory( &uBe32, pBuffer + offsetof( tpm20_get_random_t, size ), sizeof( uBe32 ) );
 				const auto generated = min( be32_to_host( uBe32 ) - cbCmd, requested );
-				/*
-				#if defined (_DEBUG)
-				TCHAR szDebug[MAX_PATH] = { 0 };
-				for (decltype(result) i = 0; i < result; i++){
-				StringCchPrintf( szDebug, MAX_PATH, TEXT( "0x%02x " ), *(pBuffer + cbCmd + i) );
-				OutputDebugString( szDebug );
-				}
-				OutputDebugString( TEXT( "\x0a" ) );
-				#endif
-				*/
 				CopyMemory( static_cast<unsigned char*>( buffer ) + result, pBuffer + cbCmd, generated );
 				result += static_cast<decltype(result)>( generated );
 				continue;
@@ -321,39 +279,83 @@ tpm20_generator_t::size_type tpm20_generator_t::fill(void* buffer, tpm20_generat
 // Functions
 //
 
-typedef std::vector<std::unique_ptr<pwd_generator_t>> pwd_generator_vector_t;
-static pwd_generator_vector_t get_pwd_generators(WPGCaps caps) {
+static SIZE_T RdRandFill(PVOID buffer, const SIZE_T size) {
 
-	pwd_generator_vector_t generators;
+	// Firstly, fill any bytes at the start of the buffer, which
+	// are not 4-byte aligned, using an additional copy
+	SIZE_T filled = 0;
+	const SIZE_T delta = reinterpret_cast<SIZE_T>( buffer ) % alignof( uint32_t );
+	if (delta){
+		uint32_t rdrand = 0;
+		if (rdrand_next( &rdrand )){
+			CopyMemory( buffer, &rdrand, delta );
+			filled += delta;
+		}else{
+			return 0;
+		}
+	}
+
+	// Secondly, fill the 4-byte aligned bytes
+	SIZE_T cb = (size - filled);
+	const SIZE_T count = cb / sizeof( uint32_t );
+	uint32_ptr next = reinterpret_cast<uint32_ptr>( reinterpret_cast<PBYTE>( buffer ) + filled );
+	for (SIZE_T s = 0; s < count; ++s){
+		if (rdrand_next( next )){
+			++next;
+			filled += sizeof( uint32_t );
+		}else{
+			return 0;
+		}
+	}
+
+	// Finally, fill any remaining bytes
+	cb -= filled;
+	if (cb){
+		uint32_t rdrand = 0;
+		if (rdrand_next( &rdrand )){
+			SIZE_T bytes = min( cb, sizeof( rdrand ) );
+			CopyMemory( reinterpret_cast<PBYTE>( buffer ) + filled, &rdrand, bytes );
+			filled += bytes;
+		}else{
+			return 0;
+		}
+	}
+	return filled;
+}
+
+typedef std::vector<std::unique_ptr<rng_t>> rng_vector_t;
+static rng_vector_t get_rngs(WPGCaps caps) {
+
+	rng_vector_t vector;
 	if (caps & WPGCapRDRAND){
-		auto rdrand = std::make_unique<rdrand_generator_t>( );
+		auto rdrand = std::make_unique<rdrand_rng_t>( );
 		if (rdrand && *rdrand){
-			generators.push_back( std::move( rdrand ) );
+			vector.push_back( std::move( rdrand ) );
 		}
 	}
 	if (caps & WPGCapTPM12){
-		auto tpm12 = std::make_unique<tpm12_generator_t>( );
+		auto tpm12 = std::make_unique<tpm12_rng_t>( );
 		if (tpm12 && *tpm12){
-			generators.push_back( std::move( tpm12 ) );
+			vector.push_back( std::move( tpm12 ) );
 		}
 	}
 	if (caps & WPGCapTPM20){
-		auto tpm20 = std::make_unique<tpm20_generator_t>( );
+		auto tpm20 = std::make_unique<tpm20_rng_t>( );
 		if (tpm20 && *tpm20){
-			generators.push_back( std::move( tpm20 ) );
+			vector.push_back( std::move( tpm20 ) );
 		}
 	}
-	return generators;
+	return vector;
 }
 
 WPGCaps WPGGetCaps(VOID) {
 
 	const WPGCaps wpgCapsAll = WPGCapRDRAND | WPGCapTPM12 | WPGCapTPM20;
-	auto generators = get_pwd_generators( wpgCapsAll );
+	auto rngs = get_rngs( wpgCapsAll );
 
 	WPGCaps caps = WPGCapNONE;
-	std::for_each( generators.cbegin( ), generators.cend( ), [&](const decltype(generators)::value_type& generator) {
-		caps |= static_cast<WPGCap>( *generator );
+	std::for_each( rngs.cbegin( ), rngs.cend( ), [&](const decltype(rngs)::value_type& rng) {
+		caps |= static_cast<WPGCap>( *rng );
 	} );
 
 	return caps;
@@ -377,6 +379,8 @@ WPGCaps WPGPwdGen(__out_ecount(cchBuffer) LPTSTR pszBuffer, __in BYTE cchBuffer,
 	std::unique_ptr<empty_bitset_t> bitset = (fDuplicatesAllowed)
 		? std::make_unique<empty_bitset_t>( cchAlphabet )
 		: std::make_unique<bitset_t>( cchAlphabet );
+	const auto xor = get_vex_xor( );
+	auto rngs = get_rngs( caps );
 
 	// Allocate a pair of buffers 
 	LPBYTE lpFront = static_cast<LPBYTE>( PH_ALLOC( cchBuffer ) );
@@ -385,47 +389,45 @@ WPGCaps WPGPwdGen(__out_ecount(cchBuffer) LPTSTR pszBuffer, __in BYTE cchBuffer,
 	// Loop until the output buffer is filled
 	decltype(cchBuffer) cchFilled = 0;
 	WPGCaps wpgCapsFailed = WPGCapNONE;
-	auto generators = get_pwd_generators( caps );
 	while ((cchFilled < cchBuffer) && (wpgCapsFailed == WPGCapNONE)){
-		auto cchUnfilled = (cchBuffer - cchFilled);
-		SecureZeroMemory( lpFront, cchUnfilled );
-		SecureZeroMemory( lpBack, cchUnfilled );
+		const decltype(cchBuffer) cchUnfilled = (cchBuffer - cchFilled);
+		auto generated = cchUnfilled;
 
 		// Generate some new random values
-		using generator_type = decltype(generators)::value_type;
-		std::for_each( generators.cbegin( ), generators.cend( ), [&](const generator_type& generator) {
-			using size_type = generator_type::element_type::size_type;
-			auto filled = generator->fill( lpBack, static_cast<size_type>( cchUnfilled ) );
+		using rng_type = decltype(rngs)::value_type;
+		using size_type = rng_type::element_type::size_type;
+		std::for_each( rngs.cbegin( ), rngs.cend( ), [&](const rng_type& rng) {
+			auto filled = rng->fill( lpBack, static_cast<size_type>( cchUnfilled ) );
 			if (filled){
 				// Xor with previously-generated values (if any)
-				for (decltype(filled) i = 0; i < filled; ++i){
-					*(lpFront + i) ^= *(lpBack + i);
-				}
+				generated = min( generated, filled );
+				xor->apply( lpFront, lpBack, generated );
 			}else{
-				wpgCapsFailed |= static_cast<WPGCap>( *generator );
+				wpgCapsFailed |= static_cast<WPGCap>( *rng );
 			}
 		} );
-		if (wpgCapsFailed != WPGCapNONE){
-			break;
-		}
-
-		// Use the contents of the front buffer as an index into the alphabet, to generate the password
-		for (decltype(cchUnfilled) i = 0; i < cchUnfilled; i++ ){
-			const auto rand = static_cast<decltype(cchAlphabet)>( *(lpFront + i) );
-			const auto index = rand % cchAlphabet;
-			if (bitset->is_set( index )){
+		if (wpgCapsFailed == WPGCapNONE){
+			// Use the contents of the front buffer as an index into the alphabet, to generate the password
+			for (decltype(generated) i = 0; i < generated; i++ ){
+				const auto rand = static_cast<decltype(cchAlphabet)>( *(lpFront + i) );
+				const auto index = rand % cchAlphabet;
+				if (bitset->is_set( index )){
 #if defined (_DEBUG)
-				TCHAR szBuf[2] = { *(pszAlphabet + index), NULL };
-				OutputDebugString( TEXT( "Already have: " ) );
-				OutputDebugString( szBuf );
-				OutputDebugString( TEXT( ". Skipping..\x0A" ) );
+					TCHAR szBuf[2] = { *(pszAlphabet + index), NULL };
+					OutputDebugString( TEXT( "Already have: " ) );
+					OutputDebugString( szBuf );
+					OutputDebugString( TEXT( ". Skipping..\x0A" ) );
 #endif
-				continue;
-			}
+					continue;
+				}
 
-			*(pszBuffer + (cchFilled++)) = *(pszAlphabet + index);
-			bitset->set( index );
+				*(pszBuffer + (cchFilled++)) = *(pszAlphabet + index);
+				bitset->set( index );
+			}
 		}
+
+		SecureZeroMemory( lpFront, cchBuffer );
+		SecureZeroMemory( lpBack, cchBuffer );
 	}
 	if (cchLength){
 		*cchLength = cchFilled;

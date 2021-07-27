@@ -20,6 +20,22 @@
 // C Standard Library Headers
 #include <limits.h>
 
+// Types
+//
+
+// Enumerates the vector extensions with which
+// we accelerate the application of XOR to buffers
+// of bytes
+typedef enum _XORVex {
+
+	XORVexNONE = 0,
+	XORVexMMX = 1,
+	XORVexSSE = 2,
+	XORVexSSE2 = 4,
+	XORVexAVX = 8
+
+} XORVex;
+
 // Classes
 //
 
@@ -125,3 +141,27 @@ private:
     word_string m_words;
 };
 
+class xor_t {
+public:
+	typedef size_t size_type;
+	typedef unsigned char* operand_type;
+
+	virtual size_type apply(operand_type front, operand_type back, size_type cb) const {
+
+		for (decltype(cb) i = 0; i < cb; ++i){
+			*(front + i) ^= *(back + i);
+		}
+		return cb;
+	}
+
+	virtual XORVex vex() const {
+		return XORVexNONE;
+	}
+};
+
+// Functions
+//
+
+// Returns an object which can be used to apply Exclusive-OR to pairs
+// of byte buffers using the widest-available vector extensions
+std::unique_ptr<xor_t> get_vex_xor(void);

@@ -18,6 +18,9 @@
 // Cryptographic API Headers
 #include <wincrypt.h>
 
+// Local Project Headers
+#include "BitOps.h"
+
 // Declarations
 #include "WPGAboutEtc.h"
 
@@ -38,12 +41,50 @@ LPWSTR LoadStringProcessHeap(HINSTANCE hInstance, UINT uID) {
 	return pszText;
 }
 
+BOOL OnInitAboutDialog(HWND hDlg) {
+
+	auto xor = get_vex_xor( );
+	
+	UINT uID = 0;
+	switch (xor->vex( )){
+		case XORVexMMX:
+			uID = IDS_USING_VEX_MMX;
+			break;
+
+		case XORVexSSE:
+			uID = IDS_USING_VEX_SSE;
+			break;
+
+		case XORVexSSE2:
+			uID = IDS_USING_VEX_SSE2;
+			break;
+
+		case XORVexAVX:
+			uID = IDS_USING_VEX_AVX;
+			break;
+
+		default:
+			// Do nothing
+			break;
+	}
+	if (uID > 0){
+		HINSTANCE hInstance = reinterpret_cast<HINSTANCE>( GetWindowLongPtr( hDlg, GWLP_HINSTANCE ) );
+		LPWSTR pszUsingVex = LoadStringProcessHeap( hInstance, uID );
+		if (pszUsingVex){
+			SetWindowTextW( GetDlgItem( hDlg, IDC_USING_VEX ), pszUsingVex );
+			PH_FREE( pszUsingVex );
+		}
+	}
+	return TRUE;
+}
+
 INT_PTR CALLBACK AboutDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 
 	BOOL bResult = TRUE;
 	switch (uMsg){
 		// The dialog was initialised
 		case WM_INITDIALOG:
+			bResult = OnInitAboutDialog( hDlg );
 			break;
 
 		case WM_CLOSE:
