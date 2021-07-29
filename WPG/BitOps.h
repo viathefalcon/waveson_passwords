@@ -10,6 +10,10 @@
 // Twitter: @viathefalcon
 //
 
+#if !defined(__BITOPS_H__)
+#define __BITOPS_H__
+
+
 // Includes
 //
 
@@ -165,3 +169,5 @@ public:
 // Returns an object which can be used to apply Exclusive-OR to pairs
 // of byte buffers using the widest-available vector extensions
 std::unique_ptr<xor_t> get_vex_xor(void);
+
+#endif // __BITOPS_H__

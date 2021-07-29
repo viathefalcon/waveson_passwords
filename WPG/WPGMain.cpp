@@ -17,14 +17,14 @@
 
 // Local Project Headers
 #include "WPGAboutEtc.h"
-#include "WPGGenerators.h"
+#include "WPGGenerator.h"
 #include "WPGRegistry.h"
 
 // Macros
 //
 
 // Defines a Windows message which, when sent to the main window, causes it to generate a new password
-#define UWM_REFRESH				(WM_APP+1L)
+#define UWM_REFRESH				(AWM_WPG_STOPPED+1L)
 
 // Constants
 //
@@ -53,6 +53,7 @@ const DWORD c_dwDefaultChecks = (c_dwRDRANDCheck | c_dwTPMCheck | c_dwDuplicates
 typedef struct _UIState {
 
 	WPGCaps wpgCaps;
+	WPG_H wpgHandle;
 
 	DWORD dwTooltips;
 	HWND* phTooltips;
@@ -86,8 +87,14 @@ HRESULT OnCopy(HWND);
 // Called when a new password is to be generated
 HRESULT OnRefresh(HWND);
 
+// Called when a new password has been generated
+HRESULT OnPwdGenerated(HWND, UINT_PTR);
+
 // Called when the main dialog is closed
 HRESULT OnClose(HWND);
+
+// Called when the generator thread has stopped
+HRESULT OnGeneratorStopped(HWND);
 
 // Returns TRUE if the contents of the input control are the default; FALSE otherwise
 LPTSTR NonDefaultAlphabet(HWND);
@@ -190,9 +197,6 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 			switch (LOWORD( wParam )){
 				case IDC_BUTTON_RESET:
 					bResult = SUCCEEDED( OnReset( hDlg ) );
-					if (bResult){
-						PostMessage( hDlg, UWM_REFRESH, 0, 0 );
-					}
 					break;
 
 				case IDC_BUTTON_REFRESH:
@@ -234,16 +238,7 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 
 		// The window's 'X' was clicked
 		case WM_CLOSE:
-		{
 			OnClose( hDlg );
-
-			// Pause (however briefly) before killing the dialog
-			if (uTimer != 0L){
-				KillTimer( hDlg, uTimer );
-			}
-			const UINT uElapse = c_uTimerElapseMinimum;
-			uTimer = SetTimer( hDlg, c_uTimer, uElapse, NULL );
-		}
 			break;
 
 		// A timer fired
@@ -284,8 +279,30 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 		}
 			break;
 
+		case AWM_WPG_STARTED:
+			OutputDebugString( TEXT( "AWM_WPG_STARTED\x0D" ) );
+
+			// Fall through
+			;
+
 		case UWM_REFRESH:
 			OnRefresh( hDlg );
+			break;
+
+		case AWM_WPG_GENERATED:
+			OnPwdGenerated( hDlg, wParam );
+			break;
+
+		case AWM_WPG_STOPPED:
+		{
+			OnGeneratorStopped( hDlg );
+
+			// Pause (however briefly) before killing the dialog
+			if (uTimer != 0L){
+				KillTimer( hDlg, uTimer );
+			}
+			uTimer = SetTimer( hDlg, c_uTimer, c_uTimerElapseMinimum, NULL );
+		}
 			break;
 
 		default:
@@ -343,6 +360,9 @@ HRESULT OnCreateTooltips(HWND hDlg) {
 
 HRESULT OnInitDialog(HWND hDlg) {
 
+	// Kick off the generator thread
+	WPG_H wpgHandle = StartWPGGenerator( hDlg );
+
 	// Set the icon, c.f. https://support.microsoft.com/en-us/help/179582/how-to-set-the-title-bar-icon-in-a-dialog-box
 	if (g_hIcon){
 		SendMessage( hDlg, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>( g_hIcon ) );
@@ -379,7 +399,7 @@ HRESULT OnInitDialog(HWND hDlg) {
 		CheckDlgButton( hDlg, IDC_CHECK_RDRAND, uCheckRDRAND );
 	}
 	UINT uCheckTPM = BST_UNCHECKED;
-	if ((caps & WPGCapTPM12) || (caps & WPGCapTPM20)){
+	if (caps & (WPGCapTPM12 | WPGCapTPM20)){
 		EnableWindow( GetDlgItem( hDlg, IDC_CHECK_TPM ), TRUE );
 		uCheckTPM = (dwChecks & c_dwTPMCheck) ? BST_CHECKED : BST_UNCHECKED;
 		CheckDlgButton( hDlg, IDC_CHECK_TPM, uCheckTPM );
@@ -405,14 +425,12 @@ HRESULT OnInitDialog(HWND hDlg) {
 	}
 
 	const BOOL bEnable = (uCheckRDRAND == BST_CHECKED) || (uCheckTPM == BST_CHECKED);
-	if (bEnable){
-		PostMessage( hDlg, UWM_REFRESH, 0, 0 );
-	}
 	EnableWindow( GetDlgItem( hDlg, IDC_BUTTON_REFRESH ), bEnable );
 
 	// Initialise the UI state
 	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( PH_ALLOC( sizeof( UIState ) ) );
 	uiStatePtr->wpgCaps = caps;
+	uiStatePtr->wpgHandle = wpgHandle;
 	SetWindowLongPtr( hDlg, GWLP_USERDATA, reinterpret_cast<LONG_PTR>( uiStatePtr ) );
 	return OnCreateTooltips( hDlg );
 }
@@ -484,7 +502,7 @@ HRESULT OnRefresh(HWND hDlg) {
 
 	// Setup
 	HWND hInput = GetDlgItem( hDlg, IDC_EDIT_INPUT );
-	const int cchAlphabet = 1 + GetWindowTextLength( hInput );
+	const int cchAlphabet = GetWindowTextLength( hInput );
 
 	// Find the intersection between the available generators and the ones the user has selected
 	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
@@ -498,7 +516,7 @@ HRESULT OnRefresh(HWND hDlg) {
 
 	// Look for an early out
 	HWND hOut = GetDlgItem( hDlg, IDC_EDIT_OUTPUT );
-	if ((caps == WPGCapNONE) || (cchAlphabet == 1)){
+	if ((caps == WPGCapNONE) || (cchAlphabet == 0)){
 		SetWindowText( hOut, TEXT( "" ) );
 		return S_OK;
 	}
@@ -513,27 +531,54 @@ HRESULT OnRefresh(HWND hDlg) {
 	LPTSTR pszAlphabet = static_cast<LPTSTR>( HeapAlloc( hProcessHeap, HEAP_ZERO_MEMORY, sizeof( TCHAR ) * (cchAlphabet+1) ) );
 	GetWindowText( hInput, pszAlphabet, cchAlphabet );
 
-	// Use this to generate the password
-	const BOOL fDuplicatesAllowed = IsDlgButtonChecked( hDlg, IDC_CHECK_ALLOW_DUPLICATES );
-	const WPGCaps wpgCapsFailed = WPGPwdGen( pszPwd, cchPwd, caps, &cchPwd, pszAlphabet, fDuplicatesAllowed );
-	HRESULT hResult = (wpgCapsFailed == WPGCapNONE) ? S_OK : E_FAIL;
-	if (SUCCEEDED( hResult )){
-		// Set the output
-		SetWindowText( hOut, pszPwd );
-		if (IsDlgButtonChecked( hDlg, IDC_CHECK_AUTO_COPY )){
-			hResult = OnCopy( hDlg );
-		}
-	}else{
-		SetErrorMsg( hDlg, wpgCapsFailed );
+	// Send to the generator thread
+	WPG_H wpgHandle = (uiStatePtr) ? uiStatePtr->wpgHandle : NULL;
+	if (wpgHandle){
+		const BOOL fDuplicatesAllowed = IsDlgButtonChecked( hDlg, IDC_CHECK_ALLOW_DUPLICATES );
+		WPGPwdGenAsync( wpgHandle, cchPwd, caps, pszAlphabet, cchAlphabet, fDuplicatesAllowed );
+		return S_OK;
 	}
+	return E_POINTER;
+}
 
-	// Cleanup and return
-	HeapFree( hProcessHeap, 0, pszAlphabet );
-	HeapFree( hProcessHeap, 0, pszPwd );
-	return hResult;
+HRESULT OnPwdGenerated(HWND hDlg, UINT_PTR uPtr) {
+
+	PWPGGenerated pWPGGenerated = reinterpret_cast<PWPGGenerated>( uPtr );
+	if (pWPGGenerated){
+		const WPGCaps wpgCapsFailed = pWPGGenerated->wpgCapsFailed;
+		HRESULT hResult = (wpgCapsFailed == WPGCapNONE) ? S_OK : E_FAIL;
+		if (SUCCEEDED( hResult )){
+			// Set the output
+			SetWindowText( GetDlgItem( hDlg, IDC_EDIT_OUTPUT ), pWPGGenerated->pszPwd );
+			if (IsDlgButtonChecked( hDlg, IDC_CHECK_AUTO_COPY )){
+				hResult = OnCopy( hDlg );
+			}
+		}else{
+			SetErrorMsg( hDlg, wpgCapsFailed );
+		}
+
+		// Cleanup
+		PH_FREE( const_cast<LPTSTR>( pWPGGenerated->pszPwd ) );
+		PH_FREE( pWPGGenerated );
+		return hResult;
+	}
+	return E_INVALIDARG;
 }
 
 HRESULT OnClose(HWND hDlg) {
+
+	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
+	WPG_H wpgHandle = (uiStatePtr) ? uiStatePtr->wpgHandle : NULL;
+	if (wpgHandle){
+		StopWPGGenerator( wpgHandle );
+		return S_OK;
+	}
+	return OnGeneratorStopped( hDlg );
+}
+
+HRESULT OnGeneratorStopped(HWND hDlg) {
+
+	OutputDebugString( TEXT( "AWM_WPG_STOPPED\x0D" ) );
 
 	HKEY hKey = NULL;
 	HRESULT hResult = WPGRegOpenKey( &hKey );
@@ -566,7 +611,7 @@ HRESULT OnClose(HWND hDlg) {
 		for (DWORD dw = 0; dw < uiStatePtr->dwTooltips; ++dw){
 			DestroyWindow( *(uiStatePtr->phTooltips + dw) );
 		}
-		PH_FREE( reinterpret_cast<LPVOID>( uiStatePtr ) );
+		PH_FREE( uiStatePtr );
 	}
 	return S_OK;
 }

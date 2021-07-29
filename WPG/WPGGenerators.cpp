@@ -15,9 +15,6 @@
 // Precompiled Headers
 #include "Stdafx.h"
 
-// C Standard Library Headers
-#include <stdlib.h>
-
 // C++ Standard Library Headers
 #include <string>
 #include <memory>
@@ -276,6 +273,132 @@ tpm20_rng_t::size_type tpm20_rng_t::fill(void* buffer, tpm20_rng_t::size_type si
 	return result;
 }
 
+class wpg_impl_t : public wpg_t {
+public:
+	wpg_impl_t(void);
+	virtual ~wpg_impl_t(void) = default;
+
+	WPGCaps generate(__out_ecount(cchBuffer) LPTSTR pszBuffer,
+					 __in BYTE cchBuffer,
+					 __in WPGCaps,
+					 __inout PBYTE,
+					 __in_z LPCTSTR,
+					 __in BOOL);
+
+	WPGCaps caps(void) const;
+
+private:
+	::std::vector<::std::unique_ptr<rng_t>> m_rngs;
+	::std::unique_ptr<xor_t> m_xor;
+};
+
+wpg_impl_t::wpg_impl_t(void): m_xor( get_vex_xor( ) ) {
+
+	auto rdrand = std::make_unique<rdrand_rng_t>( );
+	if (rdrand && *rdrand){
+		m_rngs.push_back( std::move( rdrand ) );
+	}
+	auto tpm20 = std::make_unique<tpm20_rng_t>( );
+	if (tpm20 && *tpm20){
+		m_rngs.push_back( std::move( tpm20 ) );
+
+		// If we have TPM 2.0, then we don't need TPM 1.2 (below)
+		// So we stop here
+		return;
+	}
+
+	auto tpm12 = std::make_unique<tpm12_rng_t>( );
+	if (tpm12 && *tpm12){
+		m_rngs.push_back( std::move( tpm12 ) );
+	}
+}
+
+WPGCaps wpg_impl_t::generate(__out_ecount(cchBuffer) LPTSTR pszBuffer,
+							 __in BYTE cchBuffer,
+							 __in WPGCaps caps,
+							 __inout PBYTE cchLength,
+							 __in_z LPCTSTR pszAlphabet,
+							 __in BOOL fDuplicatesAllowed) {
+
+	// Setup
+	size_t cchAlphabet = 0;
+	StringCchLength( pszAlphabet, STRSAFE_MAX_CCH, &cchAlphabet );
+	std::unique_ptr<empty_bitset_t> bitset = (fDuplicatesAllowed)
+		? std::make_unique<empty_bitset_t>( cchAlphabet )
+		: std::make_unique<bitset_t>( cchAlphabet );
+
+	// Allocate a pair of buffers 
+	LPBYTE lpFront = static_cast<LPBYTE>( PH_ALLOC( cchBuffer ) );
+	LPBYTE lpBack = static_cast<LPBYTE>( PH_ALLOC( cchBuffer ) );
+
+	// Loop until the output buffer is filled
+	decltype(cchBuffer) cchFilled = 0;
+	WPGCaps wpgCapsFailed = WPGCapNONE;
+	while ((cchFilled < cchBuffer) && (wpgCapsFailed == WPGCapNONE)){
+		const decltype(cchBuffer) cchUnfilled = (cchBuffer - cchFilled);
+		auto generated = cchUnfilled;
+
+		// Generate some new random values
+		using rng_type = decltype(m_rngs)::value_type;
+		using size_type = rng_type::element_type::size_type;
+		::std::for_each( m_rngs.cbegin( ), m_rngs.cend( ), [&](const rng_type& rng) {
+			const auto cap = static_cast<WPGCap>( *rng );
+			if ((caps & cap) == 0){
+				// The caller hasn't asked to use the current RNG, so just skip over it
+				return;
+			}
+
+			const auto filled = rng->fill( lpBack, static_cast<size_type>( cchUnfilled ) );
+			if (filled){
+				// Xor with previously-generated values (if any)
+				generated = min( generated, filled );
+				m_xor->apply( lpFront, lpBack, generated );
+			}else{
+				wpgCapsFailed |= cap;
+			}
+		} );
+		if (wpgCapsFailed == WPGCapNONE){
+			// Use the contents of the front buffer as an index into the alphabet, to generate the password
+			for (decltype(generated) i = 0; i < generated; i++ ){
+				const auto rand = static_cast<decltype(cchAlphabet)>( *(lpFront + i) );
+				const auto index = rand % cchAlphabet;
+				if (bitset->is_set( index )){
+#if defined (_DEBUG)
+					TCHAR szBuf[2] = { *(pszAlphabet + index), NULL };
+					OutputDebugString( TEXT( "Already have: " ) );
+					OutputDebugString( szBuf );
+					OutputDebugString( TEXT( ". Skipping..\x0A" ) );
+#endif
+					continue;
+				}
+
+				*(pszBuffer + (cchFilled++)) = *(pszAlphabet + index);
+				bitset->set( index );
+			}
+		}
+
+		SecureZeroMemory( lpFront, cchBuffer );
+		SecureZeroMemory( lpBack, cchBuffer );
+	}
+	if (cchLength){
+		*cchLength = cchFilled;
+	}
+
+	// Cleanup, return
+	PH_FREE( lpFront );
+	PH_FREE( lpBack );
+	return wpgCapsFailed;
+}
+
+WPGCaps wpg_impl_t::caps(void) const {
+
+	WPGCaps caps = WPGCapNONE;
+	::std::for_each( m_rngs.cbegin( ), m_rngs.cend( ), [&](const decltype(m_rngs)::value_type& rng) {
+		caps |= static_cast<WPGCap>( *rng );
+	} );
+	return caps;
+}
+
 // Functions
 //
 
@@ -323,42 +446,10 @@ static SIZE_T RdRandFill(PVOID buffer, const SIZE_T size) {
 	return filled;
 }
 
-typedef std::vector<std::unique_ptr<rng_t>> rng_vector_t;
-static rng_vector_t get_rngs(WPGCaps caps) {
-
-	rng_vector_t vector;
-	if (caps & WPGCapRDRAND){
-		auto rdrand = std::make_unique<rdrand_rng_t>( );
-		if (rdrand && *rdrand){
-			vector.push_back( std::move( rdrand ) );
-		}
-	}
-	if (caps & WPGCapTPM12){
-		auto tpm12 = std::make_unique<tpm12_rng_t>( );
-		if (tpm12 && *tpm12){
-			vector.push_back( std::move( tpm12 ) );
-		}
-	}
-	if (caps & WPGCapTPM20){
-		auto tpm20 = std::make_unique<tpm20_rng_t>( );
-		if (tpm20 && *tpm20){
-			vector.push_back( std::move( tpm20 ) );
-		}
-	}
-	return vector;
-}
-
 WPGCaps WPGGetCaps(VOID) {
 
-	const WPGCaps wpgCapsAll = WPGCapRDRAND | WPGCapTPM12 | WPGCapTPM20;
-	auto rngs = get_rngs( wpgCapsAll );
-
-	WPGCaps caps = WPGCapNONE;
-	std::for_each( rngs.cbegin( ), rngs.cend( ), [&](const decltype(rngs)::value_type& rng) {
-		caps |= static_cast<WPGCap>( *rng );
-	} );
-
-	return caps;
+	wpg_impl_t wpg;
+	return wpg.caps( );
 }
 
 WPGCap WPGCapsFirst(WPGCaps caps) {
@@ -371,70 +462,12 @@ WPGCap WPGCapsFirst(WPGCaps caps) {
 	return static_cast<WPGCap>(caps ? dw : 0);
 }
 
-WPGCaps WPGPwdGen(__out_ecount(cchBuffer) LPTSTR pszBuffer, __in BYTE cchBuffer, __in WPGCaps caps, __inout PBYTE cchLength, __in_z LPCTSTR pszAlphabet, __in BOOL fDuplicatesAllowed) {
+wpg_ptr make_new_wpg(void) {
+	return new wpg_impl_t( );
+}
 
-	// Setup
-	size_t cchAlphabet = 0;
-	StringCchLength( pszAlphabet, STRSAFE_MAX_CCH, &cchAlphabet );
-	std::unique_ptr<empty_bitset_t> bitset = (fDuplicatesAllowed)
-		? std::make_unique<empty_bitset_t>( cchAlphabet )
-		: std::make_unique<bitset_t>( cchAlphabet );
-	const auto xor = get_vex_xor( );
-	auto rngs = get_rngs( caps );
-
-	// Allocate a pair of buffers 
-	LPBYTE lpFront = static_cast<LPBYTE>( PH_ALLOC( cchBuffer ) );
-	LPBYTE lpBack = static_cast<LPBYTE>( PH_ALLOC( cchBuffer ) );
-
-	// Loop until the output buffer is filled
-	decltype(cchBuffer) cchFilled = 0;
-	WPGCaps wpgCapsFailed = WPGCapNONE;
-	while ((cchFilled < cchBuffer) && (wpgCapsFailed == WPGCapNONE)){
-		const decltype(cchBuffer) cchUnfilled = (cchBuffer - cchFilled);
-		auto generated = cchUnfilled;
-
-		// Generate some new random values
-		using rng_type = decltype(rngs)::value_type;
-		using size_type = rng_type::element_type::size_type;
-		std::for_each( rngs.cbegin( ), rngs.cend( ), [&](const rng_type& rng) {
-			auto filled = rng->fill( lpBack, static_cast<size_type>( cchUnfilled ) );
-			if (filled){
-				// Xor with previously-generated values (if any)
-				generated = min( generated, filled );
-				xor->apply( lpFront, lpBack, generated );
-			}else{
-				wpgCapsFailed |= static_cast<WPGCap>( *rng );
-			}
-		} );
-		if (wpgCapsFailed == WPGCapNONE){
-			// Use the contents of the front buffer as an index into the alphabet, to generate the password
-			for (decltype(generated) i = 0; i < generated; i++ ){
-				const auto rand = static_cast<decltype(cchAlphabet)>( *(lpFront + i) );
-				const auto index = rand % cchAlphabet;
-				if (bitset->is_set( index )){
-#if defined (_DEBUG)
-					TCHAR szBuf[2] = { *(pszAlphabet + index), NULL };
-					OutputDebugString( TEXT( "Already have: " ) );
-					OutputDebugString( szBuf );
-					OutputDebugString( TEXT( ". Skipping..\x0A" ) );
-#endif
-					continue;
-				}
-
-				*(pszBuffer + (cchFilled++)) = *(pszAlphabet + index);
-				bitset->set( index );
-			}
-		}
-
-		SecureZeroMemory( lpFront, cchBuffer );
-		SecureZeroMemory( lpBack, cchBuffer );
+void release_wpg(wpg_ptr wpg) {
+	if (wpg){
+		delete wpg;
 	}
-	if (cchLength){
-		*cchLength = cchFilled;
-	}
-
-	// Cleanup, return
-	PH_FREE( lpFront );
-	PH_FREE( lpBack );
-	return wpgCapsFailed;
 }

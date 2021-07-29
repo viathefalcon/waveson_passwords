@@ -96,6 +96,7 @@
   <ItemGroup>
     <ClInclude Include="BitOps.h" />
     <ClInclude Include="WPGAboutEtc.h" />
+    <ClInclude Include="WPGGenerator.h" />
     <ClInclude Include="WPGGenerators.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="Stdafx.h" />
@@ -105,6 +106,7 @@
   <ItemGroup>
     <ClCompile Include="BitOps.cpp" />
     <ClCompile Include="WPGAboutEtc.cpp" />
+    <ClCompile Include="WPGGenerator.cpp" />
     <ClCompile Include="WPGGenerators.cpp" />
     <ClCompile Include="Stdafx.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
