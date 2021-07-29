@@ -26,6 +26,7 @@
 // Classes
 //
 
+#if !defined (_WIN64)
 class mmx_xor_t : public xor_t {
 public:
 	size_type apply(operand_type front, operand_type back, size_type cb) const {
@@ -51,6 +52,7 @@ public:
 		return XORVexMMX;
 	}
 };
+#endif // _WIN64
 
 class sse_xor_t : public xor_t {
 public:
@@ -233,10 +235,12 @@ std::unique_ptr<xor_t> get_vex_xor_impl(void) {
 			return std::make_unique<sse_xor_t>( );
 		}
 
+#if !defined (_WIN64)
 		// MMX?
 		if ((info[3] & (1 << 23)) != 0){
 			return std::make_unique<mmx_xor_t>( );
 		}
+#endif // _WIN64
 	}
 
 	// If we get here, just return the default implementation

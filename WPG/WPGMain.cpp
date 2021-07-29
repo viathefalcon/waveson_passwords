@@ -137,7 +137,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
 		g_uwmTaskbarButtonCreated = RegisterWindowMessage( L"TaskbarButtonCreated" ); 
 
 		// Display the dialog box
-		result = DialogBoxParam( hInstance, MAKEINTRESOURCE( IDD_MAIN ), HWND_DESKTOP, MainDialogProc, 0 );
+		const INT_PTR nResult = DialogBoxParam(
+			hInstance,
+			MAKEINTRESOURCE( IDD_MAIN ),
+			HWND_DESKTOP,
+			MainDialogProc,
+			0 // dwInitParam
+		);
+		result = static_cast<int>( nResult );
 
 		// Cleanup, return
 		if (g_hIcon){
@@ -150,8 +157,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
 
 INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 
-	static UINT uTimer = 0;
 	static WORD wScroll = 0;
+	static UINT_PTR uTimer = 0;
 
 	BOOL bResult = TRUE;
 	switch (uMsg){
@@ -599,7 +606,7 @@ HRESULT OnGeneratorStopped(HWND hDlg) {
 		}
 
 		HWND hSlider = GetDlgItem( hDlg, IDC_SLIDER_OUTPUT );
-		const DWORD dwLength = SendMessage( hSlider, TBM_GETPOS, 0, 0 );
+		const DWORD dwLength = static_cast<DWORD>( SendMessage( hSlider, TBM_GETPOS, 0, 0 ) );
 		WPGRegSetDWORD( hKey, WPGRegLength, dwLength );
 
 		WPGRegCloseKey( hKey );

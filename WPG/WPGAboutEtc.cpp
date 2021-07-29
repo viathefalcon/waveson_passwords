@@ -142,7 +142,7 @@ INT_PTR CALLBACK AboutDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 #endif
 
 							HINSTANCE hResult = ShellExecute( NULL, TEXT( "open" ), pszUrl, NULL, NULL, SW_SHOWNORMAL );
-							if (reinterpret_cast<INT>( hResult ) < 32){
+							if (reinterpret_cast<INT_PTR>( hResult ) < 32){
 								LPWSTR pszMsg = LoadStringProcessHeap( hInstance, uID2 );
 								if (pszMsg){
 									MessageBox( hDlg, pszMsg, TEXT( "Error" ), MB_OK | MB_ICONERROR );
