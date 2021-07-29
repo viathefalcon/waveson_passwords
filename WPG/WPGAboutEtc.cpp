@@ -20,6 +20,7 @@
 
 // Local Project Headers
 #include "BitOps.h"
+#include "WPGGenerators.h"
 
 // Declarations
 #include "WPGAboutEtc.h"
@@ -41,11 +42,24 @@ LPWSTR LoadStringProcessHeap(HINSTANCE hInstance, UINT uID) {
 	return pszText;
 }
 
+VOID SetAboutStringMaybe(HWND hDlg, int nItem, UINT uString) {
+
+	if (uString > 0){
+		HINSTANCE hInstance = reinterpret_cast<HINSTANCE>( GetWindowLongPtr( hDlg, GWLP_HINSTANCE ) );
+		LPWSTR pszString = LoadStringProcessHeap( hInstance, uString );
+		if (pszString){
+			SetWindowTextW( GetDlgItem( hDlg, nItem ), pszString );
+			PH_FREE( pszString );
+		}
+	}
+}
+
 BOOL OnInitAboutDialog(HWND hDlg) {
 
-	auto xor = get_vex_xor( );
-	
 	UINT uID = 0;
+
+	// Identify the vector extensions we're using
+	auto xor = get_vex_xor( );
 	switch (xor->vex( )){
 		case XORVexMMX:
 			uID = IDS_USING_VEX_MMX;
@@ -67,14 +81,12 @@ BOOL OnInitAboutDialog(HWND hDlg) {
 			// Do nothing
 			break;
 	}
-	if (uID > 0){
-		HINSTANCE hInstance = reinterpret_cast<HINSTANCE>( GetWindowLongPtr( hDlg, GWLP_HINSTANCE ) );
-		LPWSTR pszUsingVex = LoadStringProcessHeap( hInstance, uID );
-		if (pszUsingVex){
-			SetWindowTextW( GetDlgItem( hDlg, IDC_USING_VEX ), pszUsingVex );
-			PH_FREE( pszUsingVex );
-		}
-	}
+	SetAboutStringMaybe( hDlg, IDC_USING_VEX, uID );
+
+	// Identify the version of TPM available to us
+	const WPGCaps caps = WPGGetCaps( );
+	uID = (caps & WPGCapTPM20) ? IDS_TPM_VERSION_20 : ((caps & WPGCapTPM12) ? IDS_TPM_VERSION_12 : 0);
+	SetAboutStringMaybe( hDlg, IDC_TPM_VERSION, uID );
 	return TRUE;
 }
 
