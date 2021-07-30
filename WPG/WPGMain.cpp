@@ -496,8 +496,13 @@ HRESULT OnCopy(HWND hDlg) {
 		}
 		CloseClipboard( );
 	}else{
-		hResult = HRESULT_FROM_WIN32( GetLastError( ) );
-		MessageBox( HWND_DESKTOP, TEXT( "Failed to open clipboard." ), TEXT( "Error" ), MB_OK | MB_ICONERROR );
+		const DWORD dwLastError = GetLastError( );
+		TCHAR szBuf[MAX_PATH] = { 0 };
+		StringCchPrintf( szBuf, MAX_PATH, TEXT( "Failed to open clipboard with error %X" ), dwLastError );
+		MessageBox( HWND_DESKTOP, szBuf, TEXT( "Error" ), MB_OK | MB_ICONERROR );
+
+		// Set the result
+		hResult = HRESULT_FROM_WIN32( dwLastError );
 	}
 	if (hGlobal){
 		GlobalFree( hGlobal );
@@ -558,7 +563,10 @@ HRESULT OnPwdGenerated(HWND hDlg, UINT_PTR uPtr) {
 			// Set the output
 			SetWindowText( GetDlgItem( hDlg, IDC_EDIT_OUTPUT ), pWPGGenerated->pszPwd );
 			if (IsDlgButtonChecked( hDlg, IDC_CHECK_AUTO_COPY )){
-				hResult = OnCopy( hDlg );
+				if FAILED( OnCopy( hDlg ) ){
+					// Automatically disable the auto-copy, if only to stop the same error dialog appearing repeatedly
+					CheckDlgButton( hDlg, IDC_CHECK_AUTO_COPY, BST_UNCHECKED );
+				}
 			}
 		}else{
 			SetErrorMsg( hDlg, wpgCapsFailed );
