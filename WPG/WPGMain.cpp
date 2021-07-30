@@ -573,6 +573,10 @@ HRESULT OnPwdGenerated(HWND hDlg, UINT_PTR uPtr) {
 		}
 
 		// Cleanup
+		SecureZeroMemory(
+			const_cast<LPTSTR>( pWPGGenerated->pszPwd ),
+			sizeof( TCHAR ) * (pWPGGenerated->cchPwd)
+		);
 		PH_FREE( const_cast<LPTSTR>( pWPGGenerated->pszPwd ) );
 		PH_FREE( pWPGGenerated );
 		return hResult;
