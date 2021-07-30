@@ -33,14 +33,35 @@ typedef enum _WPGCap {
 
 typedef DWORD WPGCaps;
 
+// Class(es)
+//
+
+class wpg_t {
+public:
+	// Generates a password in the given output buffer; returns an enumeration of the generators which failed
+	virtual WPGCaps generate(__out_ecount(cchBuffer) LPTSTR pszBuffer,
+							 __in BYTE cchBuffer,
+							 __in WPGCaps,
+							 __inout PBYTE,
+							 __in_z LPCTSTR,
+							 __in BOOL) = 0;
+};
+
+typedef wpg_t* wpg_ptr;
+
 // Prototypes
 //
 
+// Returns password-generating capabilities of the current host
 WPGCaps WPGGetCaps(VOID);
 
+// Returns the first set capability of the given collection of capabilities
 WPGCap WPGCapsFirst(WPGCaps);
 
-// Generates a password in the given output buffer; returns an enumeration of the generators which failed
-WPGCaps WPGPwdGen(__out_ecount(cchBuffer) LPTSTR pszBuffer, __in BYTE cchBuffer, __in WPGCaps, __inout PBYTE, __in_z LPCTSTR);
+// Instantiates a new password generator and returns a pointer to it
+wpg_ptr make_new_wpg(void);
+
+// Releases a previously-instantiated password generator
+void release_wpg(wpg_ptr);
 
 #endif // !defined(__WPG_GENERATORS_H__)

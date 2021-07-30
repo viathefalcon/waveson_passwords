@@ -18,24 +18,76 @@
 // Cryptographic API Headers
 #include <wincrypt.h>
 
+// Local Project Headers
+#include "BitOps.h"
+#include "WPGGenerators.h"
+
 // Declarations
 #include "WPGAboutEtc.h"
 
 // Functions
 //
 
-LPTSTR LoadStringProcessHeap(HINSTANCE hInstance, UINT uID) {
+LPWSTR LoadStringProcessHeap(HINSTANCE hInstance, UINT uID) {
 
-	LPTSTR pszTmp = NULL;
-	const int nLength = LoadString( hInstance, uID, reinterpret_cast<LPTSTR>( &pszTmp ), 0 ); // On its own, this just returns a pointer to the entire contents of the string table..?
+	LPWSTR pszTmp = NULL;
+	const int nLength = LoadStringW( hInstance, uID, reinterpret_cast<LPWSTR>( &pszTmp ), 0 ); // On its own, this just returns a pointer to the entire contents of the string table..?
 	if (!nLength){
 		return NULL;
 	}
 
 	// Allocate a null-terminated buffer and copy into it
-	LPTSTR pszText = static_cast<LPWSTR>( PH_ALLOC( sizeof( TCHAR ) * (nLength+1) ) );
-	StringCchCopy( pszText, (nLength + 1), pszTmp );
+	LPWSTR pszText = static_cast<LPWSTR>( PH_ALLOC( sizeof( WCHAR ) * (nLength+1) ) );
+	StringCchCopyW( pszText, (nLength + 1), pszTmp );
 	return pszText;
+}
+
+VOID SetAboutStringMaybe(HWND hDlg, int nItem, UINT uString) {
+
+	if (uString > 0){
+		HINSTANCE hInstance = reinterpret_cast<HINSTANCE>( GetWindowLongPtr( hDlg, GWLP_HINSTANCE ) );
+		LPWSTR pszString = LoadStringProcessHeap( hInstance, uString );
+		if (pszString){
+			SetWindowTextW( GetDlgItem( hDlg, nItem ), pszString );
+			PH_FREE( pszString );
+		}
+	}
+}
+
+BOOL OnInitAboutDialog(HWND hDlg) {
+
+	UINT uID = 0;
+
+	// Identify the vector extensions we're using
+	auto xor = get_vex_xor( );
+	switch (xor->vex( )){
+		case XORVexMMX:
+			uID = IDS_USING_VEX_MMX;
+			break;
+
+		case XORVexSSE:
+			uID = IDS_USING_VEX_SSE;
+			break;
+
+		case XORVexSSE2:
+			uID = IDS_USING_VEX_SSE2;
+			break;
+
+		case XORVexAVX:
+			uID = IDS_USING_VEX_AVX;
+			break;
+
+		default:
+			// Do nothing
+			break;
+	}
+	SetAboutStringMaybe( hDlg, IDC_USING_VEX, uID );
+
+	// Identify the version of TPM available to us
+	const WPGCaps caps = WPGGetCaps( );
+	uID = (caps & WPGCapTPM20) ? IDS_TPM_VERSION_20 : ((caps & WPGCapTPM12) ? IDS_TPM_VERSION_12 : 0);
+	SetAboutStringMaybe( hDlg, IDC_TPM_VERSION, uID );
+	return TRUE;
 }
 
 INT_PTR CALLBACK AboutDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
@@ -44,6 +96,7 @@ INT_PTR CALLBACK AboutDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 	switch (uMsg){
 		// The dialog was initialised
 		case WM_INITDIALOG:
+			bResult = OnInitAboutDialog( hDlg );
 			break;
 
 		case WM_CLOSE:
@@ -74,21 +127,23 @@ INT_PTR CALLBACK AboutDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 					}
 					if (uID1){
 						HINSTANCE hInstance = reinterpret_cast<HINSTANCE>( GetWindowLongPtr( hDlg, GWLP_HINSTANCE ) );
-						LPTSTR pszBase64 = LoadStringProcessHeap( hInstance, uID1 );
+						LPWSTR pszBase64 = LoadStringProcessHeap( hInstance, uID1 );
 						if (pszBase64){
 							// Decode from Base64
 							DWORD dwSize = 0;
 							CryptStringToBinary( pszBase64, 0, CRYPT_STRING_BASE64, NULL, &dwSize, NULL, NULL );
-							LPTSTR pszUrl = reinterpret_cast<LPTSTR>( PH_ALLOC( dwSize + sizeof( TCHAR ) ) ); // +1 for the null terminator
+							const SIZE_T cbUrl = dwSize + sizeof( WCHAR ); // +1 for the null terminator
+							LPWSTR pszUrl = reinterpret_cast<LPWSTR>( PH_ALLOC( cbUrl ) );
 							CryptStringToBinary( pszBase64, 0, CRYPT_STRING_BASE64, reinterpret_cast<BYTE*>( pszUrl ), &dwSize, NULL, NULL );
 #if defined (_DEBUG)
+							OutputDebugString( TEXT( "Going to open: " ) );
 							OutputDebugString( pszUrl );
 							OutputDebugString( TEXT( "\x0A" ) );
 #endif
 
 							HINSTANCE hResult = ShellExecute( NULL, TEXT( "open" ), pszUrl, NULL, NULL, SW_SHOWNORMAL );
-							if (reinterpret_cast<INT>( hResult ) < 32){
-								LPTSTR pszMsg = LoadStringProcessHeap( hInstance, uID2 );
+							if (reinterpret_cast<INT_PTR>( hResult ) < 32){
+								LPWSTR pszMsg = LoadStringProcessHeap( hInstance, uID2 );
 								if (pszMsg){
 									MessageBox( hDlg, pszMsg, TEXT( "Error" ), MB_OK | MB_ICONERROR );
 									PH_FREE( pszMsg );
@@ -96,14 +151,16 @@ INT_PTR CALLBACK AboutDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 									MessageBox( hDlg, TEXT( "Unhandled error" ), TEXT( "Error" ), MB_OK | MB_ICONERROR );
 								}
 							}
+							SecureZeroMemory( pszUrl, cbUrl ); // Don't leave the URL in memory after we're done
 							PH_FREE( pszUrl );
 							PH_FREE( pszBase64 );
 						}
-					}else{
-						bResult = FALSE;
+						break;
 					}
+
+					// If we get here, then fall through..
+					;
 				}
-					break;
 
 				default:
 					bResult = FALSE;
