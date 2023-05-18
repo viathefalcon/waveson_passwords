@@ -54,11 +54,42 @@ VOID SetAboutStringMaybe(HWND hDlg, int nItem, UINT uString) {
 	}
 }
 
+VOID CenterSysLink(HWND hWnd, LONG lWidth) {
+
+	// Get the current window rectangle
+	RECT r = { 0 };
+	GetWindowRect( hWnd, &r );
+
+	// Map it to its parent (implicitly: the 'About' dialog)
+	POINT p = { 0 };
+	p.x = r.left;
+	p.y = r.top;
+	ScreenToClient( GetParent( hWnd ), &p );
+
+	// Get the ideal size
+	SIZE s = { 0 };
+	s.cy = r.bottom - r.top;
+	s.cx = r.right - r.left;
+	SendMessage( hWnd, LM_GETIDEALSIZE, lWidth, reinterpret_cast<LPARAM>( &s ) );
+
+	// Move into position
+	INT x = p.x + ((lWidth - s.cx) / 2);
+	MoveWindow( hWnd, x, p.y, s.cx, s.cy, TRUE );
+}
+
 BOOL OnInitAboutDialog(HWND hDlg) {
 
-	UINT uID = 0;
+	// Use one of the pre-set labels as an anchor
+	RECT r = { 0 };
+	GetWindowRect( GetDlgItem( hDlg, IDC_USING_VEX ), &r );
+	const LONG lAnchor = r.right - r.left;
+
+	// Use this anchor to center the system links
+	CenterSysLink( GetDlgItem( hDlg, IDC_SYSLINK_EMAIL_SUPPORT ), lAnchor );
+	CenterSysLink( GetDlgItem( hDlg, IDC_SYSLINK_GITHUB ), lAnchor );
 
 	// Identify the vector extensions we're using
+	UINT uID = 0;
 	auto xor = get_vex_xor( );
 	switch (xor->vex( )){
 		case XORVexMMX:
