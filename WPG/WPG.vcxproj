@@ -96,7 +96,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>comctl32.lib;tbs.lib;crypt32.lib;..\..\rdrand_msvc_2010\$(Configuration)\RdRandStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>comctl32.lib;tbs.lib;crypt32.lib;$(OutDir)RdRandStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <AdditionalManifestFiles>WPG.manifest</AdditionalManifestFiles>
@@ -114,7 +114,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>comctl32.lib;tbs.lib;crypt32.lib;..\..\rdrand_msvc_2010\$(Platform)\$(Configuration)\RdRandStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>comctl32.lib;tbs.lib;crypt32.lib;$(OutDir)RdRandStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <AdditionalManifestFiles>WPG.manifest</AdditionalManifestFiles>
@@ -136,7 +136,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>comctl32.lib;tbs.lib;crypt32.lib;..\..\rdrand_msvc_2010\$(Configuration)\RdRandStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>comctl32.lib;tbs.lib;crypt32.lib;$(OutDir)RdRandStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <AdditionalManifestFiles>WPG.manifest</AdditionalManifestFiles>
@@ -158,7 +158,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>comctl32.lib;tbs.lib;crypt32.lib;..\..\rdrand_msvc_2010\$(Platform)\$(Configuration)\RdRandStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>comctl32.lib;tbs.lib;crypt32.lib;$(OutDir)RdRandStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <AdditionalManifestFiles>WPG.manifest</AdditionalManifestFiles>

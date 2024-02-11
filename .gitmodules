@@ -1,0 +1,4 @@
+[submodule "submodules/rdrand_msvc_2010"]
+	path = submodules/rdrand_msvc_2010
+	url = https://github.com/viathefalcon/rdrand_msvc_2010.git
+	branch = vs22
