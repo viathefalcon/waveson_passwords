@@ -1,12 +1,7 @@
 // TargetVer.h: Defines the minimum required platform.
 //
 // Waveson Password Generator
-// Web: http://waveson.com/wpg/
-// Twitter: @waveson
-//
-// Author: Stephen Higgins
-// Blog: http://blog.viathefalcon.net/
-// Twitter: @viathefalcon
+// Author: Stephen Higgins, https://github.com/viathefalcon
 //
 
 #pragma once

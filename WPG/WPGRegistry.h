@@ -1,12 +1,7 @@
 // WPGRegistry.h: declares the interface for functions for working with the windows registry.
 //
 // Waveson Password Generator
-// Web: http://waveson.com/wpg/
-// Twitter: @waveson
-//
-// Author: Stephen Higgins
-// Blog: http://blog.viathefalcon.net/
-// Twitter: @viathefalcon
+// Author: Stephen Higgins, https://github.com/viathefalcon
 //
 
 #if !defined(__WPG_REGISTRY_H__)

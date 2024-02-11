@@ -1,12 +1,7 @@
 // WPGGenerator.cpp: gives the implementation of the password-generating thread.
 //
 // Waveson Password Generator
-// Web: http://waveson.com/wpg/
-// Twitter: @waveson
-//
-// Author: Stephen Higgins
-// Blog: http://blog.viathefalcon.net/
-// Twitter: @viathefalcon
+// Author: Stephen Higgins, https://github.com/viathefalcon
 //
 
 // Includes
