@@ -362,6 +362,9 @@ HRESULT OnCreateTooltips(HWND hDlg) {
 
 HRESULT OnInitDialog(HWND hDlg) {
 
+	// Initialise the shared password generator
+	InitWPG( );
+
 	// Kick off the generator thread
 	WPG_H wpgHandle = StartWPGGenerator( hDlg );
 
@@ -627,6 +630,9 @@ HRESULT OnGeneratorStopped(HWND hDlg) {
 		}
 		PH_FREE( uiStatePtr );
 	}
+
+	// Tidy up and return
+	ReleaseWPG( );
 	return S_OK;
 }
 

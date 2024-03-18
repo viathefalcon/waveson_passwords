@@ -11,6 +11,11 @@
 // Precompiled Headers
 #include "Stdafx.h"
 
+// C++ Standard Library Headers
+#include <set>
+#include <array>
+#include <algorithm>
+
 // Microsoft-specific Intrinsics Headers
 #include <intrin.h>
 #include <xmmintrin.h>
@@ -188,23 +193,30 @@ std::unique_ptr<xor_t> get_vex_xor(void) {
 #define get_vex_xor_impl get_vex_xor
 #endif // defined (_DEBUG)
 
-// Packs the four characters in the given buffer into an integer and compares with the comparand;
-// returns 0 if equal; 1 if not.
-inline int packcmp(int comparand, __in_bcount(4) const char* buffer) {
+// Given the output of CPUID, returns the name of the CPU vendor in a string
+std::string get_cpu_vendor(int cpuid[]) {
 
-	const int packed = *((int*) buffer);
-	return (packed == comparand) ? 0 : 1;
+	std::string name;
+	std::array<int, 3> indices = { 1, 3, 2 };
+	std::for_each( indices.cbegin( ), indices.cend( ), [&](int offset) {
+		auto ptr = reinterpret_cast<char*>( cpuid + offset );
+		for (auto i = 0; i < sizeof( int ); ++i){
+			name.append( 1, *(ptr + i) );
+		}
+	} );
+	return name;
 }
 
 std::unique_ptr<xor_t> get_vex_xor_impl(void) {
 
-	// Check if we are on Intel hardware
+	// Get the CPU ID
 	int info[4] = { -1, -1, -1, -1 };
-	__cpuid( info, 0 );
-	if (packcmp( info[1], "Genu" ) == 0 &&
-		packcmp( info[3], "ineI" ) == 0 &&
-		packcmp( info[2], "ntel" ) == 0 ){
+	__cpuid(info, 0);
 
+	// Check if we are on supported hardware
+	const std::set<std::string> vendors = { "GenuineIntel", "AuthenticAMD" };
+	const auto vendor = get_cpu_vendor( info );
+	if (vendors.count( vendor ) > 0){
 		// Query for the feature flags
 		__cpuid( info, 1 );
 
