@@ -22,9 +22,6 @@
 // RDRAND Headers
 #include "ia_rdrand.h"
 
-// Local Project Headers
-#include "BitOps.h"
-
 // Declarations
 #include "WPGGenerators.h"
 
@@ -271,16 +268,25 @@ tpm20_rng_t::size_type tpm20_rng_t::fill(void* buffer, tpm20_rng_t::size_type si
 class wpg_impl_t : public wpg_t {
 public:
 	wpg_impl_t(void);
-	virtual ~wpg_impl_t(void) = default;
+	virtual ~wpg_impl_t(void) {
+#if defined (_DEBUG)
+		// Should expect to see one (1) time in the debug logs..
+		::OutputDebugStringA("~wpg_impl_t();\x0A");
+#endif
+	}
 
-	WPGCaps generate(__out_ecount(cchBuffer) LPTSTR pszBuffer,
+	WPGCaps Generate(__out_ecount(cchBuffer) LPTSTR pszBuffer,
 					 __in BYTE cchBuffer,
 					 __in WPGCaps,
 					 __inout PBYTE,
 					 __in_z LPCTSTR,
 					 __in BOOL);
 
-	WPGCaps caps(void) const;
+	WPGCaps Caps(void) const;
+
+	XORVex Vex(void) const {
+		return m_xor->vex( );
+	}
 
 private:
 	::std::vector<::std::unique_ptr<rng_t>> m_rngs;
@@ -308,7 +314,7 @@ wpg_impl_t::wpg_impl_t(void): m_xor( get_vex_xor( ) ) {
 	}
 }
 
-WPGCaps wpg_impl_t::generate(__out_ecount(cchBuffer) LPTSTR pszBuffer,
+WPGCaps wpg_impl_t::Generate(__out_ecount(cchBuffer) LPTSTR pszBuffer,
 							 __in BYTE cchBuffer,
 							 __in WPGCaps caps,
 							 __inout PBYTE cchLength,
@@ -385,7 +391,7 @@ WPGCaps wpg_impl_t::generate(__out_ecount(cchBuffer) LPTSTR pszBuffer,
 	return wpgCapsFailed;
 }
 
-WPGCaps wpg_impl_t::caps(void) const {
+WPGCaps wpg_impl_t::Caps(void) const {
 
 	WPGCaps caps = WPGCapNONE;
 	::std::for_each( m_rngs.cbegin( ), m_rngs.cend( ), [&](const decltype(m_rngs)::value_type& rng) {
@@ -394,8 +400,21 @@ WPGCaps wpg_impl_t::caps(void) const {
 	return caps;
 }
 
+// Globals
+//
+
+static std::shared_ptr<wpg_impl_t> g_wpg;
+
 // Functions
 //
+
+static std::shared_ptr<wpg_impl_t> get_wpg_impl(void) {
+
+	if (!g_wpg){
+		g_wpg = std::shared_ptr<wpg_impl_t>( new wpg_impl_t( ) );
+	}
+	return g_wpg;
+}
 
 static SIZE_T RdRandFill(PVOID buffer, const SIZE_T size) {
 
@@ -443,8 +462,8 @@ static SIZE_T RdRandFill(PVOID buffer, const SIZE_T size) {
 
 WPGCaps WPGGetCaps(VOID) {
 
-	wpg_impl_t wpg;
-	return wpg.caps( );
+	const auto wpg = get_wpg_impl( );
+	return wpg->Caps( );
 }
 
 WPGCap WPGCapsFirst(WPGCaps caps) {
@@ -457,12 +476,14 @@ WPGCap WPGCapsFirst(WPGCaps caps) {
 	return static_cast<WPGCap>(caps ? dw : 0);
 }
 
-wpg_ptr make_new_wpg(void) {
-	return new wpg_impl_t( );
+void InitWPG(void) {
+	get_wpg_impl( );
 }
 
-void release_wpg(wpg_ptr wpg) {
-	if (wpg){
-		delete wpg;
-	}
+std::shared_ptr<wpg_t> GetWPG(void) {
+	return get_wpg_impl( );
+}
+
+void ReleaseWPG(void) {
+	g_wpg.reset( );
 }

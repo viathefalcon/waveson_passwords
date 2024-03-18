@@ -85,8 +85,8 @@ BOOL OnInitAboutDialog(HWND hDlg) {
 
 	// Identify the vector extensions we're using
 	UINT uID = 0;
-	auto xor = get_vex_xor( );
-	switch (xor->vex( )){
+	auto wpg = GetWPG( );
+	switch (wpg->Vex( )){
 		case XORVexMMX:
 			uID = IDS_USING_VEX_MMX;
 			break;

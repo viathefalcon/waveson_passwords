@@ -14,6 +14,12 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+// C++ Standard Library Headers
+#include <memory>
+
+// Local Project Headers
+#include "BitOps.h"
+
 // Types
 //
 
@@ -34,12 +40,17 @@ typedef DWORD WPGCaps;
 class wpg_t {
 public:
 	// Generates a password in the given output buffer; returns an enumeration of the generators which failed
-	virtual WPGCaps generate(__out_ecount(cchBuffer) LPTSTR pszBuffer,
+	virtual WPGCaps Generate(__out_ecount(cchBuffer) LPTSTR pszBuffer,
 							 __in BYTE cchBuffer,
 							 __in WPGCaps,
 							 __inout PBYTE,
 							 __in_z LPCTSTR,
 							 __in BOOL) = 0;
+
+	// Return a token indicating the vector extensions being used by the generator
+	virtual XORVex Vex(void) const {
+		return XORVexNONE;
+	}
 };
 
 typedef wpg_t* wpg_ptr;
@@ -53,10 +64,13 @@ WPGCaps WPGGetCaps(VOID);
 // Returns the first set capability of the given collection of capabilities
 WPGCap WPGCapsFirst(WPGCaps);
 
-// Instantiates a new password generator and returns a pointer to it
-wpg_ptr make_new_wpg(void);
+// Initialises the shared password generator
+void InitWPG(void);
 
-// Releases a previously-instantiated password generator
-void release_wpg(wpg_ptr);
+// Returns a shared pointer to a password generator
+std::shared_ptr<wpg_t> GetWPG(void);
+
+// Releases the shared password generator
+void ReleaseWPG(void);
 
 #endif // !defined(__WPG_GENERATORS_H__)

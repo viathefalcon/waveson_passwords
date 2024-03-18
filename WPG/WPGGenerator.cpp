@@ -35,7 +35,7 @@ typedef struct _WPG_THREAD_PROPS {
 	HWND hWnd;
 	HANDLE hEvent;
 
-	wpg_ptr wpg;
+	std::shared_ptr<wpg_t> wpg;
 
 } WPG_THREAD_PROPS, *PWPG_THREAD_PROPS;
 
@@ -228,7 +228,7 @@ LRESULT CALLBACK WPGGeneratorWindowProcedure(HWND hWnd, UINT uMessage, WPARAM wP
 			);
 			if (pThreadProps){
 				// Create and capture the password generator
-				pThreadProps->wpg = make_new_wpg( );
+				pThreadProps->wpg = GetWPG( );
 
 				PostMessage(
 					pThreadProps->hWnd,
@@ -259,7 +259,7 @@ LRESULT CALLBACK WPGGeneratorWindowProcedure(HWND hWnd, UINT uMessage, WPARAM wP
 
 				// Do the password generation
 				auto wpg = pThreadProps->wpg;
-				pWPGGenerated->wpgCapsFailed = wpg->generate(
+				pWPGGenerated->wpgCapsFailed = wpg->Generate(
 					const_cast<LPTSTR>( pWPGGenerated->pszPwd ),
 					pWPGGenerated->cchPwd,
 					pArgs->wpgCaps,
@@ -303,8 +303,7 @@ LRESULT CALLBACK WPGGeneratorWindowProcedure(HWND hWnd, UINT uMessage, WPARAM wP
 				GetWindowLongPtr( hWnd, GWLP_USERDATA )
 			);
 			if (pThreadProps){
-				release_wpg( pThreadProps->wpg );
-				pThreadProps->wpg = nullptr;
+				pThreadProps->wpg.reset( );
 			}
 		}
 			break;
