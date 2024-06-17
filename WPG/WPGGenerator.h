@@ -41,7 +41,13 @@ typedef struct _WPGGenerated {
 WPG_H StartWPGGenerator(HWND);
 
 // Generates a password in the given output buffer; returns an enumeration of the generators which failed
-VOID WPGPwdGenAsync(__in WPG_H, __in BYTE, __in WPGCaps, __in_z LPCTSTR, __in BYTE, __in BOOL);
+VOID WPGPwdGenAsync(__in WPG_H, __in BYTE, __in WPGCaps);
+
+// Sets the alphabet to be used for subsequently-generated passwords
+VOID SetPwdAlphabetAsync(__in WPG_H, __in LPCTSTR, __in BYTE);
+
+// Enables/disables the use of duplicate characters in subsequently-genreated passwords
+VOID EnablePwdDuplicatesAsync(__in WPG_H, __in BOOL);
 
 // Stops the thread
 VOID StopWPGGenerator(WPG_H);

@@ -24,17 +24,16 @@
 // Constants
 //
 
-// Identifies the timer
-const UINT c_uTimer = 123L;
+// Identifies the termination timer
+const UINT c_uTerminationTimer = 123U;
+
+// Specifies the intervals for the timer
+const UINT c_uTerminationTimerElapseMinimum = 1U;
 
 // Specifies the minimum, maximum and default lengths of generated passwords
 const BYTE c_cbMinLength = 0x01;
 const BYTE c_cbMaxLength = 0xFF;
 const BYTE c_cbDefaultLength = 0x10;
-
-// Specifies the intervals for the timer
-const UINT c_uTimerElapseDefault = 1000U;
-const UINT c_uTimerElapseMinimum = 1U;
 
 const DWORD c_dwRDRANDCheck = 0x80000000;
 const DWORD c_dwTPMCheck = 0x00800000;
@@ -91,6 +90,12 @@ HRESULT OnClose(HWND);
 // Called when the generator thread has stopped
 HRESULT OnGeneratorStopped(HWND);
 
+// Called when the alphabet changes, and needs to be sent to the generator
+HRESULT OnPwdAlphabetChanged(HWND);
+
+// Called when the toggle to enable/disable duplicates changes
+HRESULT OnEnableDuplicatesChanged(HWND);
+
 // Returns TRUE if the contents of the input control are the default; FALSE otherwise
 LPTSTR NonDefaultAlphabet(HWND);
 
@@ -129,7 +134,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
 		g_hIcon = reinterpret_cast<HICON>( LoadImage( hInstance, MAKEINTRESOURCE( IDI_WAVESON ), IMAGE_ICON, GetSystemMetrics( SM_CXSMICON ), GetSystemMetrics( SM_CYSMICON ), 0 ) );
 
 		// Register the message
-		g_uwmTaskbarButtonCreated = RegisterWindowMessage( L"TaskbarButtonCreated" ); 
+		g_uwmTaskbarButtonCreated = RegisterWindowMessage( L"TaskbarButtonCreated" );
 
 		// Display the dialog box
 		const INT_PTR nResult = DialogBoxParam(
@@ -157,7 +162,6 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 
 	BOOL bResult = TRUE;
 	switch (uMsg){
-
 		// The dialog was initialised
 		case WM_INITDIALOG:
 			bResult = SUCCEEDED( OnInitDialog( hDlg ) );
@@ -210,6 +214,13 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 					break;
 
 				case IDC_CHECK_ALLOW_DUPLICATES:
+					if (HIWORD( wParam ) == BN_CLICKED){
+						OnEnableDuplicatesChanged( hDlg );
+					}
+
+					// Fall through
+					;
+
 				case IDC_CHECK_RDRAND:
 				case IDC_CHECK_TPM:
 					if (HIWORD( wParam ) == BN_CLICKED){
@@ -218,12 +229,9 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 					break;
 
 				case IDC_EDIT_INPUT:
-					// If the contents of the input have changed,
-					// then check whether the 'Allow duplicates...'
-					// checkbox should/should not be ticked
 					switch (HIWORD( wParam )){
 						case EN_CHANGE:
-							AutoCheckDuplicatesAndRefresh( hDlg );
+							OnPwdAlphabetChanged( hDlg );
 							break;
 
 						default:
@@ -246,7 +254,7 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 		// A timer fired
 		case WM_TIMER:
 			switch (wParam){
-				case c_uTimer:
+				case c_uTerminationTimer:
 					// Kill the timer
 					KillTimer( hDlg, uTimer );
 					uTimer = 0L;
@@ -284,8 +292,10 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 		case AWM_WPG_STARTED:
 			OutputDebugString( TEXT( "AWM_WPG_STARTED\x0D" ) );
 
-			// Fall through
-			;
+			// Set the initial state
+			OnEnableDuplicatesChanged( hDlg );
+			OnPwdAlphabetChanged( hDlg );
+			break;
 
 		case UWM_REFRESH:
 			OnRefresh( hDlg );
@@ -303,7 +313,7 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 			if (uTimer != 0L){
 				KillTimer( hDlg, uTimer );
 			}
-			uTimer = SetTimer( hDlg, c_uTimer, c_uTimerElapseMinimum, NULL );
+			uTimer = SetTimer( hDlg, c_uTerminationTimer, c_uTerminationTimerElapseMinimum, NULL );
 		}
 			break;
 
@@ -510,12 +520,12 @@ HRESULT OnCopy(HWND hDlg) {
 
 HRESULT OnRefresh(HWND hDlg) {
 
-	// Setup
-	HWND hInput = GetDlgItem( hDlg, IDC_EDIT_INPUT );
-	const int cchAlphabet = GetWindowTextLength( hInput );
-
 	// Find the intersection between the available generators and the ones the user has selected
 	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
+	if (uiStatePtr == NULL){
+		return E_POINTER;
+	}
+
 	WPGCaps caps = uiStatePtr->wpgCaps;
 	if (!IsDlgButtonChecked( hDlg, IDC_CHECK_RDRAND )){
 		caps &= ~WPGCapRDRAND;
@@ -526,7 +536,7 @@ HRESULT OnRefresh(HWND hDlg) {
 
 	// Look for an early out
 	HWND hOut = GetDlgItem( hDlg, IDC_EDIT_OUTPUT );
-	if ((caps == WPGCapNONE) || (cchAlphabet == 0)){
+	if ((caps == WPGCapNONE)){
 		SetWindowText( hOut, TEXT( "" ) );
 		return S_OK;
 	}
@@ -537,15 +547,10 @@ HRESULT OnRefresh(HWND hDlg) {
 	HANDLE hProcessHeap = GetProcessHeap( );
 	LPTSTR pszPwd = static_cast<LPTSTR>( HeapAlloc( hProcessHeap, HEAP_ZERO_MEMORY, sizeof( TCHAR ) * (cchPwd+1) ) );
 
-	// Get a copy of the input alphabet
-	LPTSTR pszAlphabet = static_cast<LPTSTR>( HeapAlloc( hProcessHeap, HEAP_ZERO_MEMORY, sizeof( TCHAR ) * (cchAlphabet+1) ) );
-	GetWindowText( hInput, pszAlphabet, cchAlphabet );
-
 	// Send to the generator thread
 	WPG_H wpgHandle = (uiStatePtr) ? uiStatePtr->wpgHandle : NULL;
 	if (wpgHandle){
-		const BOOL fDuplicatesAllowed = IsDlgButtonChecked( hDlg, IDC_CHECK_ALLOW_DUPLICATES );
-		WPGPwdGenAsync( wpgHandle, cchPwd, caps, pszAlphabet, cchAlphabet, fDuplicatesAllowed );
+		WPGPwdGenAsync( wpgHandle, cchPwd, caps );
 		return S_OK;
 	}
 	return E_POINTER;
@@ -591,6 +596,48 @@ HRESULT OnClose(HWND hDlg) {
 		return S_OK;
 	}
 	return OnGeneratorStopped( hDlg );
+}
+
+HRESULT OnPwdAlphabetChanged(HWND hDlg) {
+
+	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
+	WPG_H wpgHandle = (uiStatePtr) ? uiStatePtr->wpgHandle : NULL;
+	if (wpgHandle == NULL){
+		// Bail
+		return S_FALSE;
+	}
+
+	// Get a copy of the input alphabet
+	HWND hInput = GetDlgItem( hDlg, IDC_EDIT_INPUT );
+	const int cchAlphabet = GetWindowTextLength( hInput );
+	LPTSTR pszAlphabet = (cchAlphabet > 0)
+		? static_cast<LPTSTR>( PH_ALLOC( sizeof( TCHAR ) * (cchAlphabet+1) ) )
+		: NULL;
+	if (pszAlphabet){
+		GetWindowText( hInput, pszAlphabet, (cchAlphabet+1) );
+	}
+
+	// Set it at the generator thread
+	SetPwdAlphabetAsync( wpgHandle, pszAlphabet, static_cast<BYTE>( cchAlphabet ) );
+	if (pszAlphabet){
+		PH_FREE( pszAlphabet );
+	}
+	AutoCheckDuplicatesAndRefresh( hDlg );
+	return S_OK;
+}
+
+HRESULT OnEnableDuplicatesChanged(HWND hDlg) {
+
+	// Get the status
+	const BOOL fDuplicatesAllowed = IsDlgButtonChecked( hDlg, IDC_CHECK_ALLOW_DUPLICATES );
+
+	// Pass onto the generator
+	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
+	WPG_H wpgHandle = (uiStatePtr) ? uiStatePtr->wpgHandle : NULL;
+	if (wpgHandle){
+		EnablePwdDuplicatesAsync( wpgHandle, fDuplicatesAllowed );
+	}
+	return S_OK;
 }
 
 HRESULT OnGeneratorStopped(HWND hDlg) {
@@ -713,6 +760,7 @@ VOID AutoCheckDuplicatesAndRefresh(HWND hDlg) {
 			IDC_CHECK_ALLOW_DUPLICATES,
 			BST_CHECKED
 		);
+		OnEnableDuplicatesChanged( hDlg );
 		fEnabled = FALSE;
 	}
 	EnableWindow( GetDlgItem( hDlg, IDC_CHECK_ALLOW_DUPLICATES ), fEnabled );
