@@ -37,6 +37,9 @@ typedef struct _WPG_THREAD_PROPS {
 	HWND hWnd;
 	HANDLE hEvent;
 
+	BYTE cchMax;
+	LPTSTR pszBuffer;
+
 	std::shared_ptr<wpg_t> wpg;
 
 	BYTE cchAlphabet;
@@ -45,13 +48,6 @@ typedef struct _WPG_THREAD_PROPS {
 	BOOL fDuplicatesAllowed;
 
 } WPG_THREAD_PROPS, *PWPG_THREAD_PROPS;
-
-typedef struct _WPG_ARGS {
-
-	BYTE cchLength;
-	WPGCaps wpgCaps;
-
-} WPG_ARGS, *PWPG_ARGS;
 
 // Constants
 //
@@ -86,7 +82,7 @@ HRESULT OnEnablePwdDuplicates(HWND, WPARAM, LPARAM);
 // Functions
 //
 
-WPG_H StartWPGGenerator(HWND hWnd) {
+WPG_H StartWPGGenerator(HWND hWnd, BYTE cchMax) {
 
 	// Allocate the structure
 	PWPG_INSTANCE pInstance = reinterpret_cast<PWPG_INSTANCE>(
@@ -99,12 +95,15 @@ WPG_H StartWPGGenerator(HWND hWnd) {
 	// Create the event
 	pInstance->hEvent = CreateEvent( NULL, TRUE, FALSE, NULL );
 
-	// Spin the thread
+	// Allocate the control structure
 	PWPG_THREAD_PROPS pThreadProps = reinterpret_cast<PWPG_THREAD_PROPS>(
 		PH_ALLOC( sizeof( WPG_THREAD_PROPS ) )
 	);
 	pThreadProps->hWnd = hWnd;
 	pThreadProps->hEvent = pInstance->hEvent;
+	pThreadProps->cchMax = cchMax;
+
+	// Spin the thread
 	pInstance->hThread = CreateThread(
 		NULL,
 		0,
@@ -119,19 +118,13 @@ WPG_H StartWPGGenerator(HWND hWnd) {
 
 VOID WPGPwdGenAsync(__in WPG_H wpgHandle, __in BYTE cchLength, __in WPGCaps wpgCaps) {
 
-	// Wrap up the arguments
-	PWPG_ARGS pArgs = static_cast<PWPG_ARGS>(
-		PH_ALLOC( sizeof( WPG_ARGS ) )
-	);
-	pArgs->cchLength = cchLength;
-	pArgs->wpgCaps = wpgCaps;
-
-	// Post them to the thread
+	// Post to the thread
 	PWPG_INSTANCE pInstance = reinterpret_cast<PWPG_INSTANCE>(
 		wpgHandle
 	);
-	WPARAM wParam = reinterpret_cast<WPARAM>( pArgs );
-	PostThreadMessage( pInstance->dwThreadId, AWM_WPG_GENERATE, wParam, 0U );
+	WPARAM wParam = static_cast<WPARAM>( cchLength );
+	LPARAM lParam = static_cast<LPARAM>( wpgCaps );
+	PostThreadMessage( pInstance->dwThreadId, AWM_WPG_GENERATE, wParam, lParam );
 }
 
 VOID SetPwdAlphabetAsync(__in WPG_H wpgHandle, __in LPCTSTR pszAlphabet, __in BYTE cchAlphabet) {
@@ -192,9 +185,12 @@ DWORD WINAPI WPGGeneratorThreadProc(__in LPVOID lpParameter) {
 	PWPG_THREAD_PROPS pThreadProps = reinterpret_cast<PWPG_THREAD_PROPS>(
 		lpParameter
 	);
-	HINSTANCE hInstance = static_cast<HINSTANCE>( GetModuleHandle( NULL ) );
+	pThreadProps->pszBuffer = static_cast<LPTSTR>(
+		PH_ALLOC( sizeof( TCHAR ) * (static_cast<SIZE_T>( pThreadProps->cchMax ) + 1U) )
+	);
 
 	// Create the message window
+	HINSTANCE hInstance = static_cast<HINSTANCE>( GetModuleHandle( NULL ) );
 	HWND hWnd = NULL;
 	WNDCLASSEX wcx = { 0 };
 	wcx.cbSize = sizeof( WNDCLASSEX );
@@ -251,6 +247,10 @@ DWORD WINAPI WPGGeneratorThreadProc(__in LPVOID lpParameter) {
 	if (pThreadProps->pszAlphabet){
 		PH_FREE( const_cast<LPTSTR>( pThreadProps->pszAlphabet ) );
 		pThreadProps->pszAlphabet = NULL;
+	}
+	if (pThreadProps->pszBuffer){
+		PH_FREE( pThreadProps->pszBuffer );
+		pThreadProps->pszBuffer = NULL;
 	}
 	PH_FREE( lpParameter );
 
@@ -333,49 +333,47 @@ LRESULT CALLBACK WPGGeneratorWindowProcedure(HWND hWnd, UINT uMessage, WPARAM wP
 HRESULT OnGeneratePassword(HWND hWnd, WPARAM wParam, LPARAM lParam) {
 
 	// Unpack the arguments
-	PWPG_ARGS pArgs = reinterpret_cast<PWPG_ARGS>( wParam );
 	PWPG_THREAD_PROPS pThreadProps = reinterpret_cast<PWPG_THREAD_PROPS>(
 		GetWindowLongPtr( hWnd, GWLP_USERDATA )
 	);
 	if (pThreadProps && pThreadProps->wpg){
+		// Setup
+		const BYTE cchLength = static_cast<BYTE>( wParam );
+		const WPGCaps wpgCaps = static_cast<WPGCaps>( lParam );
 		const BOOL fEmpty = (pThreadProps->pszAlphabet == NULL) || (pThreadProps->cchAlphabet < 1);
-
-		// Allocate the output structure
-		PWPGGenerated pWPGGenerated = static_cast<PWPGGenerated>( PH_ALLOC( sizeof( WPGGenerated ) ) );
-		pWPGGenerated->cchPwd = fEmpty ? 0 : pArgs->cchLength;
-		pWPGGenerated->pszPwd = static_cast<LPCTSTR>( PH_ALLOC( sizeof( TCHAR ) * (pWPGGenerated->cchPwd + 1) ) );
+		BYTE cch = fEmpty ? 0 : min( cchLength, pThreadProps->cchMax );
 
 		// Do the password generation
-		auto wpg = pThreadProps->wpg;
-		pWPGGenerated->wpgCapsFailed = wpg->Generate(
-			const_cast<LPTSTR>( pWPGGenerated->pszPwd ),
-			pWPGGenerated->cchPwd,
-			pArgs->wpgCaps,
-			&(pWPGGenerated->cchPwd),
+		WPGCaps wpgCapsFailed = pThreadProps->wpg->Generate(
+			pThreadProps->pszBuffer,
+			cch,
+			wpgCaps,
+			&(cch),
 			pThreadProps->pszAlphabet,
 			pThreadProps->fDuplicatesAllowed
 		);
 
 #if defined (_DEBUG)
-		if (pWPGGenerated->wpgCapsFailed == WPGCapNONE){
+		if (wpgCapsFailed == WPGCapNONE){
 			OutputDebugString( TEXT( "Generator thread generated password: " ) );
-			OutputDebugString( pWPGGenerated->pszPwd );
+			OutputDebugString( pThreadProps->pszBuffer );
 			OutputDebugString( TEXT( "\x0A" ) );
 		}else{
 			OutputDebugString( TEXT( "Failed to generate password in generator thread\x0A" ) );
 		}
 #endif
 
-		// Send the output to the main thread
-		PostMessage(
+		// Send to the target window (synchronously)
+		SendMessage(
 			pThreadProps->hWnd,
 			AWM_WPG_GENERATED,
-			reinterpret_cast<WPARAM>( pWPGGenerated ),
-			lParam
+			reinterpret_cast<WPARAM>( pThreadProps->pszBuffer ),
+			static_cast<LPARAM>( wpgCapsFailed )
 		);
+		SecureZeroMemory( pThreadProps->pszBuffer, pThreadProps->cchMax );
+		return S_OK;
 	}
-	PH_FREE( pArgs );
-	return S_OK;
+	return E_POINTER;
 }
 
 HRESULT OnSetPwdAlphabet(HWND hWnd, WPARAM wParam, LPARAM lParam) {

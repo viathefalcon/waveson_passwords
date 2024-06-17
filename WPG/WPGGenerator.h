@@ -22,23 +22,11 @@ DECLARE_HANDLE(WPG_H);
 #define AWM_WPG_GENERATED	(AWM_WPG_STARTED+1)
 #define AWM_WPG_STOPPED		(AWM_WPG_GENERATED+1)
 
-// Types
-//
-
-typedef struct _WPGGenerated {
-
-	WPGCaps wpgCapsFailed;
-
-	BYTE cchPwd;
-	LPCTSTR pszPwd;
-
-} WPGGenerated, *PWPGGenerated;
-
 // Functions
 //
 
 // Starts the thread
-WPG_H StartWPGGenerator(HWND);
+WPG_H StartWPGGenerator(HWND, BYTE);
 
 // Generates a password in the given output buffer; returns an enumeration of the generators which failed
 VOID WPGPwdGenAsync(__in WPG_H, __in BYTE, __in WPGCaps);

@@ -18,8 +18,9 @@
 // Macros
 //
 
-// Defines a Windows message which, when sent to the main window, causes it to generate a new password
+// Custom Windows messages we post to ourselves
 #define UWM_REFRESH				(AWM_WPG_STOPPED+1L)
+#define UWM_COPY				(UWM_REFRESH+1L)
 
 // Constants
 //
@@ -31,9 +32,9 @@ const UINT c_uTerminationTimer = 123U;
 const UINT c_uTerminationTimerElapseMinimum = 1U;
 
 // Specifies the minimum, maximum and default lengths of generated passwords
-const BYTE c_cbMinLength = 0x01;
-const BYTE c_cbMaxLength = 0xFF;
-const BYTE c_cbDefaultLength = 0x10;
+const BYTE c_cchMinLength = 0x01;
+const BYTE c_cchMaxLength = 0xFF;
+const BYTE c_cchDefaultLength = 0x10;
 
 const DWORD c_dwRDRANDCheck = 0x80000000;
 const DWORD c_dwTPMCheck = 0x00800000;
@@ -82,7 +83,7 @@ HRESULT OnCopy(HWND);
 HRESULT OnRefresh(HWND);
 
 // Called when a new password has been generated
-HRESULT OnPwdGenerated(HWND, UINT_PTR);
+HRESULT OnPwdGenerated(HWND, WPARAM, LPARAM);
 
 // Called when the main dialog is closed
 HRESULT OnClose(HWND);
@@ -297,12 +298,8 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 			OnPwdAlphabetChanged( hDlg );
 			break;
 
-		case UWM_REFRESH:
-			OnRefresh( hDlg );
-			break;
-
 		case AWM_WPG_GENERATED:
-			OnPwdGenerated( hDlg, wParam );
+			OnPwdGenerated( hDlg, wParam, lParam );
 			break;
 
 		case AWM_WPG_STOPPED:
@@ -315,6 +312,18 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 			}
 			uTimer = SetTimer( hDlg, c_uTerminationTimer, c_uTerminationTimerElapseMinimum, NULL );
 		}
+			break;
+
+		case UWM_REFRESH:
+			OnRefresh( hDlg );
+			break;
+
+		case UWM_COPY:
+			bResult = SUCCEEDED( OnCopy( hDlg ) );
+			if (!bResult){
+				// Automatically disable the auto-copy, if only to stop the same error dialog appearing repeatedly
+				CheckDlgButton( hDlg, IDC_CHECK_AUTO_COPY, BST_UNCHECKED );
+			}
 			break;
 
 		default:
@@ -376,7 +385,7 @@ HRESULT OnInitDialog(HWND hDlg) {
 	InitWPG( );
 
 	// Kick off the generator thread
-	WPG_H wpgHandle = StartWPGGenerator( hDlg );
+	WPG_H wpgHandle = StartWPGGenerator( hDlg, c_cchMaxLength );
 
 	// Set the icon, c.f. https://support.microsoft.com/en-us/help/179582/how-to-set-the-title-bar-icon-in-a-dialog-box
 	if (g_hIcon){
@@ -384,11 +393,11 @@ HRESULT OnInitDialog(HWND hDlg) {
 	}
 
 	LPTSTR pszAlphabet = NULL;
-	DWORD dwLength = c_cbDefaultLength, dwChecks = c_dwDefaultChecks;
+	DWORD dwLength = c_cchDefaultLength, dwChecks = c_dwDefaultChecks;
 	HKEY hKey = NULL;
 	if (SUCCEEDED( WPGRegOpenKey( &hKey ) )){
 		if (FAILED( WPGRegGetDWORD( &dwLength, hKey, WPGRegLength ) )){
-			dwLength = c_cbDefaultLength;
+			dwLength = c_cchDefaultLength;
 		}
 		if (FAILED( WPGRegGetDWORD( &dwChecks, hKey, WPGRegChecks ) ) || (dwChecks == 0)){
 			dwChecks = c_dwDefaultChecks;
@@ -401,8 +410,8 @@ HRESULT OnInitDialog(HWND hDlg) {
 
 	// Configure the slider
 	HWND hSlider = GetDlgItem( hDlg, IDC_SLIDER_OUTPUT );
-	SendMessage( hSlider, TBM_SETRANGE, TRUE, MAKELPARAM( c_cbMinLength, c_cbMaxLength ) );
-	SendMessage( hSlider, TBM_SETTICFREQ, (c_cbDefaultLength - 1), 0 );
+	SendMessage( hSlider, TBM_SETRANGE, TRUE, MAKELPARAM( c_cchMinLength, c_cchMaxLength ) );
+	SendMessage( hSlider, TBM_SETTICFREQ, (c_cchDefaultLength - 1), 0 );
 	SendMessage( hSlider, TBM_SETPOS, TRUE, dwLength );
 
 	// Get the 'capabilities' of the password generator
@@ -556,35 +565,22 @@ HRESULT OnRefresh(HWND hDlg) {
 	return E_POINTER;
 }
 
-HRESULT OnPwdGenerated(HWND hDlg, UINT_PTR uPtr) {
+HRESULT OnPwdGenerated(HWND hDlg, WPARAM wParam, LPARAM lParam) {
 
-	PWPGGenerated pWPGGenerated = reinterpret_cast<PWPGGenerated>( uPtr );
-	if (pWPGGenerated){
-		const WPGCaps wpgCapsFailed = pWPGGenerated->wpgCapsFailed;
-		HRESULT hResult = (wpgCapsFailed == WPGCapNONE) ? S_OK : E_FAIL;
-		if (SUCCEEDED( hResult )){
-			// Set the output
-			SetWindowText( GetDlgItem( hDlg, IDC_EDIT_OUTPUT ), pWPGGenerated->pszPwd );
-			if (IsDlgButtonChecked( hDlg, IDC_CHECK_AUTO_COPY )){
-				if FAILED( OnCopy( hDlg ) ){
-					// Automatically disable the auto-copy, if only to stop the same error dialog appearing repeatedly
-					CheckDlgButton( hDlg, IDC_CHECK_AUTO_COPY, BST_UNCHECKED );
-				}
-			}
-		}else{
-			SetErrorMsg( hDlg, wpgCapsFailed );
+	const WPGCaps wpgCapsFailed = static_cast<WPGCaps>( lParam );
+	HRESULT hResult = (wpgCapsFailed == WPGCapNONE) ? S_OK : E_FAIL;
+	if (SUCCEEDED( hResult )){
+		LPCTSTR pszPwd = reinterpret_cast<LPCTSTR>( wParam );
+
+		// Set the output
+		SetWindowText( GetDlgItem( hDlg, IDC_EDIT_OUTPUT ), pszPwd );
+		if (IsDlgButtonChecked( hDlg, IDC_CHECK_AUTO_COPY )){
+			PostMessage( hDlg, UWM_COPY, 0U, 0U );
 		}
-
-		// Cleanup
-		SecureZeroMemory(
-			const_cast<LPTSTR>( pWPGGenerated->pszPwd ),
-			sizeof( TCHAR ) * (pWPGGenerated->cchPwd)
-		);
-		PH_FREE( const_cast<LPTSTR>( pWPGGenerated->pszPwd ) );
-		PH_FREE( pWPGGenerated );
-		return hResult;
+	}else{
+		SetErrorMsg( hDlg, wpgCapsFailed );
 	}
-	return E_INVALIDARG;
+	return hResult;
 }
 
 HRESULT OnClose(HWND hDlg) {
