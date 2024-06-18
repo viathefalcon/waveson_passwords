@@ -21,21 +21,23 @@
 #define AWM_WPG_GENERATE		(AWM_WPG_DUPLICATES+1)
 #define AWM_WPG_STOP			(AWM_WPG_GENERATE+1)
 
+#define WPG_NON_STOP			0
+
 // Types
 //
 
 typedef struct _WPG_INSTANCE {
 
-	HANDLE hEvent;
 	HANDLE hThread;
 	DWORD dwThreadId;
+	LONG* plStop;
 
 } WPG_INSTANCE, *PWPG_INSTANCE;
 
 typedef struct _WPG_THREAD_PROPS {
 
 	HWND hWnd;
-	HANDLE hEvent;
+	LONG* plStop;
 
 	BYTE cchMax;
 	LPTSTR pszBuffer;
@@ -64,9 +66,6 @@ static LPCTSTR c_pszWindowTitle = TEXT( "WPGGenerator" );
 // Gives the starting address for the worker thread
 DWORD WINAPI WPGGeneratorThreadProc(__in LPVOID);
 
-// Releases the resources associated with the given instance
-VOID CleanUpWPGGenerator(__in PWPG_INSTANCE);
-
 // Processes messages for the message window
 LRESULT CALLBACK WPGGeneratorWindowProcedure(HWND, UINT, WPARAM, LPARAM);
 
@@ -91,16 +90,15 @@ WPG_H StartWPGGenerator(HWND hWnd, BYTE cchMax) {
 	if (pInstance == NULL){
 		return NULL;
 	}
-
-	// Create the event
-	pInstance->hEvent = CreateEvent( NULL, TRUE, FALSE, NULL );
+	pInstance->plStop = reinterpret_cast<LONG*>( _aligned_malloc( sizeof( LONG ), sizeof( LONG ) ) );
+	*(pInstance->plStop) = WPG_NON_STOP;
 
 	// Allocate the control structure
 	PWPG_THREAD_PROPS pThreadProps = reinterpret_cast<PWPG_THREAD_PROPS>(
 		PH_ALLOC( sizeof( WPG_THREAD_PROPS ) )
 	);
+	pThreadProps->plStop = pInstance->plStop;
 	pThreadProps->hWnd = hWnd;
-	pThreadProps->hEvent = pInstance->hEvent;
 	pThreadProps->cchMax = cchMax;
 
 	// Spin the thread
@@ -112,7 +110,6 @@ WPG_H StartWPGGenerator(HWND hWnd, BYTE cchMax) {
 		0,
 		&(pInstance->dwThreadId)
 	);
-
 	return reinterpret_cast<WPG_H>( pInstance );
 }
 
@@ -154,7 +151,7 @@ VOID EnablePwdDuplicatesAsync(__in WPG_H wpgHandle, __in BOOL fEnabled) {
 	// Post it to the thread
 	PWPG_INSTANCE pInstance = reinterpret_cast<PWPG_INSTANCE>(
 		wpgHandle
-		);
+	);
 	PostThreadMessage(
 		pInstance->dwThreadId,
 		AWM_WPG_DUPLICATES,
@@ -165,18 +162,34 @@ VOID EnablePwdDuplicatesAsync(__in WPG_H wpgHandle, __in BOOL fEnabled) {
 
 VOID StopWPGGenerator(WPG_H wpgHandle) {
 
+	// Raise the stop sign
 	PWPG_INSTANCE pInstance = reinterpret_cast<PWPG_INSTANCE>(
 		wpgHandle
 	);
-
-	// Signal the thread to stop, and wait for it
+	InterlockedIncrement( pInstance->plStop );
 	PostThreadMessage( pInstance->dwThreadId, AWM_WPG_STOP, 0, 0 );
-	WaitForSingleObject( pInstance->hEvent, INFINITE );
+}
 
-	// Cleanup
-	CloseHandle( pInstance->hEvent );
+VOID CleanupWPGGenerator(WPG_H wpgHandle) {
+
+	if (wpgHandle == NULL){
+		return;
+	}
+	PWPG_INSTANCE pInstance = reinterpret_cast<PWPG_INSTANCE>(
+		wpgHandle
+	);
+	if (pInstance->plStop){
+		_aligned_free( pInstance->plStop );
+		pInstance->plStop = NULL;
+	}
 	CloseHandle( pInstance->hThread );
 	PH_FREE( pInstance );
+}
+
+// Indicates whether the given generator thread should stop
+static inline BOOL WPGGeneratorShouldStop(__in PWPG_THREAD_PROPS pThreadProps) {
+	const LONG value = InterlockedCompareExchange( pThreadProps->plStop, WPG_NON_STOP, WPG_NON_STOP );
+	return (value > WPG_NON_STOP);
 }
 
 DWORD WINAPI WPGGeneratorThreadProc(__in LPVOID lpParameter) {
@@ -219,6 +232,14 @@ DWORD WINAPI WPGGeneratorThreadProc(__in LPVOID lpParameter) {
 		do {
 			// Get the next message
 			if (GetMessage( &msg, NULL, 0U, 0U )){
+				// Look for an early out
+				if (WPGGeneratorShouldStop( pThreadProps )){
+#if defined (_DEBUG)
+					OutputDebugString( TEXT( "WPGGeneratorShouldStop\x0A"  ) );
+#endif
+					break;
+				}
+
 				// Route anything not bound for any window to the window..?
 				if (!msg.hwnd){
 					msg.hwnd = hWnd;
@@ -229,33 +250,28 @@ DWORD WINAPI WPGGeneratorThreadProc(__in LPVOID lpParameter) {
 				DispatchMessage( &msg );
 			}
 		} while (msg.message != AWM_WPG_STOP);
+		DestroyWindow( hWnd );		
 	}else{
 		// Signal failure
 		;
 	}
 
-	// Notify the host that we're done
-	PostMessage(
-		pThreadProps->hWnd,
-		AWM_WPG_STOPPED,
-		0,
-		0
-	);
-	HANDLE hEvent = pThreadProps->hEvent;
-
 	// Cleanup
-	if (pThreadProps->pszAlphabet){
-		PH_FREE( const_cast<LPTSTR>( pThreadProps->pszAlphabet ) );
-		pThreadProps->pszAlphabet = NULL;
-	}
+	HWND hWndHost = pThreadProps->hWnd;
 	if (pThreadProps->pszBuffer){
 		PH_FREE( pThreadProps->pszBuffer );
 		pThreadProps->pszBuffer = NULL;
 	}
+	if (pThreadProps->pszAlphabet){
+		PH_FREE( const_cast<LPTSTR>( pThreadProps->pszAlphabet ) );
+		pThreadProps->pszAlphabet = NULL;
+	}
+	pThreadProps->plStop = NULL;
+	pThreadProps->wpg.reset( );
 	PH_FREE( lpParameter );
 
 	// Signal that we're done
-	SetEvent( hEvent );
+	PostMessage( hWndHost, AWM_WPG_STOPPED, 0, 0 );
 #if defined (_DEBUG)
 	OutputDebugString( TEXT( "Generator thread finishing..\x0A"  ) );
 #endif
@@ -307,18 +323,9 @@ LRESULT CALLBACK WPGGeneratorWindowProcedure(HWND hWnd, UINT uMessage, WPARAM wP
 			break;
 
 		case AWM_WPG_STOP:
-		{
 #if defined (_DEBUG)
 			OutputDebugString( TEXT( "AWM_WPG_STOP\x0D" ) );
 #endif
-			// Cleanup the password generator
-			PWPG_THREAD_PROPS pThreadProps = reinterpret_cast<PWPG_THREAD_PROPS>(
-				GetWindowLongPtr( hWnd, GWLP_USERDATA )
-			);
-			if (pThreadProps){
-				pThreadProps->wpg.reset( );
-			}
-		}
 			break;
 
 		// All other messages

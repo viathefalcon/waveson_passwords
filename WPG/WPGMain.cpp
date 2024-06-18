@@ -589,9 +589,8 @@ HRESULT OnClose(HWND hDlg) {
 	WPG_H wpgHandle = (uiStatePtr) ? uiStatePtr->wpgHandle : NULL;
 	if (wpgHandle){
 		StopWPGGenerator( wpgHandle );
-		return S_OK;
 	}
-	return OnGeneratorStopped( hDlg );
+	return S_OK;
 }
 
 HRESULT OnPwdAlphabetChanged(HWND hDlg) {
@@ -668,6 +667,8 @@ HRESULT OnGeneratorStopped(HWND hDlg) {
 	// Cleanup the UI state
 	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
 	if (uiStatePtr){
+		CleanupWPGGenerator( uiStatePtr->wpgHandle );
+
 		for (DWORD dw = 0; dw < uiStatePtr->dwTooltips; ++dw){
 			DestroyWindow( *(uiStatePtr->phTooltips + dw) );
 		}

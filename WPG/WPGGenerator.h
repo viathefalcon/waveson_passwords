@@ -40,4 +40,7 @@ VOID EnablePwdDuplicatesAsync(__in WPG_H, __in BOOL);
 // Stops the thread
 VOID StopWPGGenerator(WPG_H);
 
+// Cleans up after the thread
+VOID CleanupWPGGenerator(WPG_H);
+
 #endif // __WPG_H__
