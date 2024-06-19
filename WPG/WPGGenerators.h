@@ -51,6 +51,14 @@ public:
 	virtual XORVex Vex(void) const {
 		return XORVexNONE;
 	}
+
+	// Returns a token indicating the generator's capabilities
+	virtual WPGCaps Caps(void) const {
+		return WPGCapNONE;
+	}
+
+	// Instantiates a new generator
+	static std::shared_ptr<wpg_t> New(void);
 };
 
 typedef wpg_t* wpg_ptr;
@@ -58,19 +66,7 @@ typedef wpg_t* wpg_ptr;
 // Prototypes
 //
 
-// Returns password-generating capabilities of the current host
-WPGCaps WPGGetCaps(VOID);
-
 // Returns the first set capability of the given collection of capabilities
 WPGCap WPGCapsFirst(WPGCaps);
-
-// Initialises the shared password generator
-void InitWPG(void);
-
-// Returns a shared pointer to a password generator
-std::shared_ptr<wpg_t> GetWPG(void);
-
-// Releases the shared password generator
-void ReleaseWPG(void);
 
 #endif // !defined(__WPG_GENERATORS_H__)

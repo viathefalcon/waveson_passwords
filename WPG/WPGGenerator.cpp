@@ -21,7 +21,10 @@
 #define AWM_WPG_GENERATE		(AWM_WPG_DUPLICATES+1)
 #define AWM_WPG_STOP			(AWM_WPG_GENERATE+1)
 
-#define WPG_NON_STOP			0
+// Constants
+//
+
+constexpr LONG WPG_NON_STOP = 0;
 
 // Types
 //
@@ -201,6 +204,7 @@ DWORD WINAPI WPGGeneratorThreadProc(__in LPVOID lpParameter) {
 	pThreadProps->pszBuffer = static_cast<LPTSTR>(
 		PH_ALLOC( sizeof( TCHAR ) * (static_cast<SIZE_T>( pThreadProps->cchMax ) + 1U) )
 	);
+	pThreadProps->wpg = wpg_t::New( );
 
 	// Create the message window
 	HINSTANCE hInstance = static_cast<HINSTANCE>( GetModuleHandle( NULL ) );
@@ -287,24 +291,26 @@ LRESULT CALLBACK WPGGeneratorWindowProcedure(HWND hWnd, UINT uMessage, WPARAM wP
 #if defined (_DEBUG)
 			OutputDebugString( TEXT( "WPGGenerator: WM_CREATE\x0D" ) );
 #endif
-			// Signal the spawning thread that we've started
 			LPCREATESTRUCT lpCreate = reinterpret_cast<LPCREATESTRUCT>( lParam );
 			PWPG_THREAD_PROPS pThreadProps = reinterpret_cast<PWPG_THREAD_PROPS>(
 				lpCreate->lpCreateParams
 			);
 			if (pThreadProps){
-				// Create and capture the password generator
-				pThreadProps->wpg = GetWPG( );
-
-				PostMessage(
-					pThreadProps->hWnd,
-					AWM_WPG_STARTED,
-					0, 0
-				);
+				// Attach the thread properties to the window
 				SetWindowLongPtr(
 					hWnd,
 					GWLP_USERDATA,
 					reinterpret_cast<LONG_PTR>( lpCreate->lpCreateParams )
+				);
+
+				// Signal the spawning thread that we've started
+				const auto caps = pThreadProps->wpg->Caps( );
+				const auto vex = pThreadProps->wpg->Vex( );
+				PostMessage(
+					pThreadProps->hWnd,
+					AWM_WPG_STARTED,
+					static_cast<WPARAM>( caps ),
+					static_cast<LPARAM>( vex )
 				);
 			}
 		}

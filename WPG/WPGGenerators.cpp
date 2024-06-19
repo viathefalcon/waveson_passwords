@@ -400,21 +400,12 @@ WPGCaps wpg_impl_t::Caps(void) const {
 	return caps;
 }
 
-// Globals
-//
-
-static std::shared_ptr<wpg_impl_t> g_wpg;
+std::shared_ptr<wpg_t> wpg_t::New(void) {
+	return std::shared_ptr<wpg_impl_t>( new wpg_impl_t( ) );
+}
 
 // Functions
 //
-
-static std::shared_ptr<wpg_impl_t> get_wpg_impl(void) {
-
-	if (!g_wpg){
-		g_wpg = std::shared_ptr<wpg_impl_t>( new wpg_impl_t( ) );
-	}
-	return g_wpg;
-}
 
 static SIZE_T RdRandFill(PVOID buffer, const SIZE_T size) {
 
@@ -460,12 +451,6 @@ static SIZE_T RdRandFill(PVOID buffer, const SIZE_T size) {
 	return filled;
 }
 
-WPGCaps WPGGetCaps(VOID) {
-
-	const auto wpg = get_wpg_impl( );
-	return wpg->Caps( );
-}
-
 WPGCap WPGCapsFirst(WPGCaps caps) {
 
 	DWORD dw = 1;
@@ -474,16 +459,4 @@ WPGCap WPGCapsFirst(WPGCaps caps) {
 		dw <<= 1;
 	}
 	return static_cast<WPGCap>(caps ? dw : 0);
-}
-
-void InitWPG(void) {
-	get_wpg_impl( );
-}
-
-std::shared_ptr<wpg_t> GetWPG(void) {
-	return get_wpg_impl( );
-}
-
-void ReleaseWPG(void) {
-	g_wpg.reset( );
 }

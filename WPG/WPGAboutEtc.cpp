@@ -13,10 +13,6 @@
 // Cryptographic API Headers
 #include <wincrypt.h>
 
-// Local Project Headers
-#include "BitOps.h"
-#include "WPGGenerators.h"
-
 // Declarations
 #include "WPGAboutEtc.h"
 
@@ -72,7 +68,7 @@ VOID CenterSysLink(HWND hWnd, LONG lWidth) {
 	MoveWindow( hWnd, x, p.y, s.cx, s.cy, TRUE );
 }
 
-BOOL OnInitAboutDialog(HWND hDlg) {
+BOOL OnInitAboutDialog(HWND hDlg, WPARAM WParam, LPARAM lParam) {
 
 	// Use one of the pre-set labels as an anchor
 	RECT r = { 0 };
@@ -85,8 +81,8 @@ BOOL OnInitAboutDialog(HWND hDlg) {
 
 	// Identify the vector extensions we're using
 	UINT uID = 0;
-	auto wpg = GetWPG( );
-	switch (wpg->Vex( )){
+	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( lParam );
+	switch (uiStatePtr->wpgVex){
 		case XORVexMMX:
 			uID = IDS_USING_VEX_MMX;
 			break;
@@ -110,8 +106,10 @@ BOOL OnInitAboutDialog(HWND hDlg) {
 	SetAboutStringMaybe( hDlg, IDC_USING_VEX, uID );
 
 	// Identify the version of TPM available to us
-	const WPGCaps caps = WPGGetCaps( );
-	uID = (caps & WPGCapTPM20) ? IDS_TPM_VERSION_20 : ((caps & WPGCapTPM12) ? IDS_TPM_VERSION_12 : 0);
+	const WPGCaps caps = uiStatePtr->wpgCaps;
+	uID = (caps & WPGCapTPM20)
+		? IDS_TPM_VERSION_20
+		: ((caps & WPGCapTPM12) ? IDS_TPM_VERSION_12 : 0);
 	SetAboutStringMaybe( hDlg, IDC_TPM_VERSION, uID );
 	return TRUE;
 }
@@ -122,7 +120,7 @@ INT_PTR CALLBACK AboutDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPa
 	switch (uMsg){
 		// The dialog was initialised
 		case WM_INITDIALOG:
-			bResult = OnInitAboutDialog( hDlg );
+			bResult = OnInitAboutDialog( hDlg, wParam, lParam );
 			break;
 
 		case WM_CLOSE:

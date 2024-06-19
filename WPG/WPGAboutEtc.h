@@ -14,6 +14,26 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+// Local Project Headers
+#include "WPGGenerator.h"
+
+// Types
+//
+
+typedef struct _UIState {
+
+	WPGCaps wpgCaps;
+	XORVex wpgVex;
+
+	BOOL fClipboardOpen;
+
+	DWORD dwTooltips;
+	HWND* phTooltips;
+
+	WPG_H wpgHandle;
+
+} UIState, *UIStatePtr;
+
 // Functions
 //
 
