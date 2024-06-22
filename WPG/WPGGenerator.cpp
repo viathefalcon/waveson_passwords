@@ -16,38 +16,43 @@
 // Macros
 //
 
-#define AWM_WPG_GENERATE		(AWM_WPG_STOPPED+1)
+#define AWM_WPG_ALPHABET		(AWM_WPG_STOPPED+1)
+#define AWM_WPG_DUPLICATES		(AWM_WPG_ALPHABET+1)
+#define AWM_WPG_GENERATE		(AWM_WPG_DUPLICATES+1)
 #define AWM_WPG_STOP			(AWM_WPG_GENERATE+1)
+
+// Constants
+//
+
+constexpr LONG WPG_NON_STOP = 0;
 
 // Types
 //
 
 typedef struct _WPG_INSTANCE {
 
-	HANDLE hEvent;
 	HANDLE hThread;
 	DWORD dwThreadId;
+	LONG* plStop;
 
 } WPG_INSTANCE, *PWPG_INSTANCE;
 
 typedef struct _WPG_THREAD_PROPS {
 
 	HWND hWnd;
-	HANDLE hEvent;
+	LONG* plStop;
+
+	BYTE cchMax;
+	LPTSTR pszBuffer;
 
 	std::shared_ptr<wpg_t> wpg;
 
-} WPG_THREAD_PROPS, *PWPG_THREAD_PROPS;
-
-typedef struct _WPG_ARGS {
-
-	BYTE cchLength;
-	WPGCaps wpgCaps;
-	LPCTSTR pszAlphabet;
 	BYTE cchAlphabet;
-	BOOL fDuplicates;
+	LPCTSTR pszAlphabet;
 
-} WPG_ARGS, *PWPG_ARGS;
+	BOOL fDuplicatesAllowed;
+
+} WPG_THREAD_PROPS, *PWPG_THREAD_PROPS;
 
 // Constants
 //
@@ -64,16 +69,22 @@ static LPCTSTR c_pszWindowTitle = TEXT( "WPGGenerator" );
 // Gives the starting address for the worker thread
 DWORD WINAPI WPGGeneratorThreadProc(__in LPVOID);
 
-// Releases the resources associated with the given instance
-VOID CleanUpWPGGenerator(__in PWPG_INSTANCE);
-
 // Processes messages for the message window
 LRESULT CALLBACK WPGGeneratorWindowProcedure(HWND, UINT, WPARAM, LPARAM);
+
+// Called when a new password is to be generated
+HRESULT OnGeneratePassword(HWND, WPARAM, LPARAM);
+
+// Called when the alphabet to use for password generation changes
+HRESULT OnSetPwdAlphabet(HWND, WPARAM, LPARAM);
+
+// Called when the 'allow duplicates' toggle is flipped
+HRESULT OnEnablePwdDuplicates(HWND, WPARAM, LPARAM);
 
 // Functions
 //
 
-WPG_H StartWPGGenerator(HWND hWnd) {
+WPG_H StartWPGGenerator(HWND hWnd, BYTE cchMax) {
 
 	// Allocate the structure
 	PWPG_INSTANCE pInstance = reinterpret_cast<PWPG_INSTANCE>(
@@ -82,16 +93,18 @@ WPG_H StartWPGGenerator(HWND hWnd) {
 	if (pInstance == NULL){
 		return NULL;
 	}
+	pInstance->plStop = reinterpret_cast<LONG*>( _aligned_malloc( sizeof( LONG ), sizeof( LONG ) ) );
+	*(pInstance->plStop) = WPG_NON_STOP;
 
-	// Create the event
-	pInstance->hEvent = CreateEvent( NULL, TRUE, FALSE, NULL );
-
-	// Spin the thread
+	// Allocate the control structure
 	PWPG_THREAD_PROPS pThreadProps = reinterpret_cast<PWPG_THREAD_PROPS>(
 		PH_ALLOC( sizeof( WPG_THREAD_PROPS ) )
 	);
+	pThreadProps->plStop = pInstance->plStop;
 	pThreadProps->hWnd = hWnd;
-	pThreadProps->hEvent = pInstance->hEvent;
+	pThreadProps->cchMax = cchMax;
+
+	// Spin the thread
 	pInstance->hThread = CreateThread(
 		NULL,
 		0,
@@ -100,44 +113,86 @@ WPG_H StartWPGGenerator(HWND hWnd) {
 		0,
 		&(pInstance->dwThreadId)
 	);
-
 	return reinterpret_cast<WPG_H>( pInstance );
 }
 
-VOID WPGPwdGenAsync(__in WPG_H wpgHandle, __in BYTE cchLength, __in WPGCaps wpgCaps, __in_z LPCTSTR pszAlphabet, __in BYTE cchAlphabet, __in BOOL fDuplicates) {
+VOID WPGPwdGenAsync(__in WPG_H wpgHandle, __in BYTE cchLength, __in WPGCaps wpgCaps) {
 
-	// Wrap up the arguments
-	PWPG_ARGS pArgs = static_cast<PWPG_ARGS>(
-		PH_ALLOC( sizeof( WPG_ARGS ) )
-	);
-	pArgs->cchLength = cchLength;
-	pArgs->wpgCaps = wpgCaps;
-	pArgs->pszAlphabet = pszAlphabet;
-	pArgs->cchAlphabet = cchAlphabet;
-	pArgs->fDuplicates = fDuplicates;
-
-	// Post them to the thread
+	// Post to the thread
 	PWPG_INSTANCE pInstance = reinterpret_cast<PWPG_INSTANCE>(
 		wpgHandle
 	);
-	WPARAM wParam = reinterpret_cast<WPARAM>( pArgs );
-	PostThreadMessage( pInstance->dwThreadId, AWM_WPG_GENERATE, wParam, 0U );
+	WPARAM wParam = static_cast<WPARAM>( cchLength );
+	LPARAM lParam = static_cast<LPARAM>( wpgCaps );
+	PostThreadMessage( pInstance->dwThreadId, AWM_WPG_GENERATE, wParam, lParam );
+}
+
+VOID SetPwdAlphabetAsync(__in WPG_H wpgHandle, __in LPCTSTR pszAlphabet, __in BYTE cchAlphabet) {
+
+	// Take a (null-terminated) copy of the string
+	LPTSTR pszCopy = (cchAlphabet > 0)
+		? static_cast<LPTSTR>( PH_ALLOC( sizeof( TCHAR ) * (cchAlphabet + 1) ) )
+		: NULL;
+	if (pszCopy){
+		CopyMemory( pszCopy, pszAlphabet, sizeof( TCHAR ) * cchAlphabet );
+	}
+
+	// Post it to the thread
+	PWPG_INSTANCE pInstance = reinterpret_cast<PWPG_INSTANCE>(
+		wpgHandle
+	);
+	PostThreadMessage(
+		pInstance->dwThreadId,
+		AWM_WPG_ALPHABET,
+		reinterpret_cast<WPARAM>( pszCopy ),
+		static_cast<LPARAM>( cchAlphabet )
+	);
+}
+
+VOID EnablePwdDuplicatesAsync(__in WPG_H wpgHandle, __in BOOL fEnabled) {
+
+	// Post it to the thread
+	PWPG_INSTANCE pInstance = reinterpret_cast<PWPG_INSTANCE>(
+		wpgHandle
+	);
+	PostThreadMessage(
+		pInstance->dwThreadId,
+		AWM_WPG_DUPLICATES,
+		static_cast<WPARAM>( fEnabled ),
+		0U
+	);
 }
 
 VOID StopWPGGenerator(WPG_H wpgHandle) {
 
+	// Raise the stop sign
 	PWPG_INSTANCE pInstance = reinterpret_cast<PWPG_INSTANCE>(
 		wpgHandle
 	);
-
-	// Signal the thread to stop, and wait for it
+	InterlockedIncrement( pInstance->plStop );
 	PostThreadMessage( pInstance->dwThreadId, AWM_WPG_STOP, 0, 0 );
-	WaitForSingleObject( pInstance->hEvent, INFINITE );
+}
 
-	// Cleanup
-	CloseHandle( pInstance->hEvent );
+VOID CleanupWPGGenerator(WPG_H wpgHandle) {
+
+	if (wpgHandle == NULL){
+		return;
+	}
+	PWPG_INSTANCE pInstance = reinterpret_cast<PWPG_INSTANCE>(
+		wpgHandle
+	);
+	if (pInstance->plStop){
+		_aligned_free( pInstance->plStop );
+		pInstance->plStop = NULL;
+	}
 	CloseHandle( pInstance->hThread );
 	PH_FREE( pInstance );
+}
+
+// Indicates whether the given generator thread should stop
+static inline BOOL WPGGeneratorShouldStop(__in PWPG_THREAD_PROPS pThreadProps) {
+	const LONG value = InterlockedCompareExchange( pThreadProps->plStop, WPG_NON_STOP, WPG_NON_STOP );
+	return (value > WPG_NON_STOP);
 }
 
 DWORD WINAPI WPGGeneratorThreadProc(__in LPVOID lpParameter) {
@@ -146,9 +201,13 @@ DWORD WINAPI WPGGeneratorThreadProc(__in LPVOID lpParameter) {
 	PWPG_THREAD_PROPS pThreadProps = reinterpret_cast<PWPG_THREAD_PROPS>(
 		lpParameter
 	);
-	HINSTANCE hInstance = static_cast<HINSTANCE>( GetModuleHandle( NULL ) );
+	pThreadProps->pszBuffer = static_cast<LPTSTR>(
+		PH_ALLOC( sizeof( TCHAR ) * (static_cast<SIZE_T>( pThreadProps->cchMax ) + 1U) )
+	);
+	pThreadProps->wpg = wpg_t::New( );
 
 	// Create the message window
+	HINSTANCE hInstance = static_cast<HINSTANCE>( GetModuleHandle( NULL ) );
 	HWND hWnd = NULL;
 	WNDCLASSEX wcx = { 0 };
 	wcx.cbSize = sizeof( WNDCLASSEX );
@@ -177,6 +236,14 @@ DWORD WINAPI WPGGeneratorThreadProc(__in LPVOID lpParameter) {
 		do {
 			// Get the next message
 			if (GetMessage( &msg, NULL, 0U, 0U )){
+				// Look for an early out
+				if (WPGGeneratorShouldStop( pThreadProps )){
+#if defined (_DEBUG)
+					OutputDebugString( TEXT( "WPGGeneratorShouldStop\x0A"  ) );
+#endif
+					break;
+				}
+
 				// Route anything not bound for any window to the window..?
 				if (!msg.hwnd){
 					msg.hwnd = hWnd;
@@ -187,25 +254,28 @@ DWORD WINAPI WPGGeneratorThreadProc(__in LPVOID lpParameter) {
 				DispatchMessage( &msg );
 			}
 		} while (msg.message != AWM_WPG_STOP);
+		DestroyWindow( hWnd );		
 	}else{
 		// Signal failure
 		;
 	}
 
-	// Notify the host that we're done
-	PostMessage(
-		pThreadProps->hWnd,
-		AWM_WPG_STOPPED,
-		0,
-		0
-	);
-
 	// Cleanup
-	HANDLE hEvent = pThreadProps->hEvent;
+	HWND hWndHost = pThreadProps->hWnd;
+	if (pThreadProps->pszBuffer){
+		PH_FREE( pThreadProps->pszBuffer );
+		pThreadProps->pszBuffer = NULL;
+	}
+	if (pThreadProps->pszAlphabet){
+		PH_FREE( const_cast<LPTSTR>( pThreadProps->pszAlphabet ) );
+		pThreadProps->pszAlphabet = NULL;
+	}
+	pThreadProps->plStop = NULL;
+	pThreadProps->wpg.reset( );
 	PH_FREE( lpParameter );
 
 	// Signal that we're done
-	SetEvent( hEvent );
+	PostMessage( hWndHost, AWM_WPG_STOPPED, 0, 0 );
 #if defined (_DEBUG)
 	OutputDebugString( TEXT( "Generator thread finishing..\x0A"  ) );
 #endif
@@ -221,91 +291,47 @@ LRESULT CALLBACK WPGGeneratorWindowProcedure(HWND hWnd, UINT uMessage, WPARAM wP
 #if defined (_DEBUG)
 			OutputDebugString( TEXT( "WPGGenerator: WM_CREATE\x0D" ) );
 #endif
-			// Signal the spawning thread that we've started
 			LPCREATESTRUCT lpCreate = reinterpret_cast<LPCREATESTRUCT>( lParam );
 			PWPG_THREAD_PROPS pThreadProps = reinterpret_cast<PWPG_THREAD_PROPS>(
 				lpCreate->lpCreateParams
 			);
 			if (pThreadProps){
-				// Create and capture the password generator
-				pThreadProps->wpg = GetWPG( );
-
-				PostMessage(
-					pThreadProps->hWnd,
-					AWM_WPG_STARTED,
-					0, 0
-				);
+				// Attach the thread properties to the window
 				SetWindowLongPtr(
 					hWnd,
 					GWLP_USERDATA,
 					reinterpret_cast<LONG_PTR>( lpCreate->lpCreateParams )
 				);
+
+				// Signal the spawning thread that we've started
+				const auto caps = pThreadProps->wpg->Caps( );
+				const auto vex = pThreadProps->wpg->Vex( );
+				PostMessage(
+					pThreadProps->hWnd,
+					AWM_WPG_STARTED,
+					static_cast<WPARAM>( caps ),
+					static_cast<LPARAM>( vex )
+				);
 			}
 		}
+			break;
+
+		case AWM_WPG_ALPHABET:
+			OnSetPwdAlphabet( hWnd, wParam, lParam );
+			break;
+
+		case AWM_WPG_DUPLICATES:
+			OnEnablePwdDuplicates( hWnd, wParam, lParam );
 			break;
 
 		case AWM_WPG_GENERATE:
-		{
-			// Unpack the arguments
-			PWPG_ARGS pArgs = reinterpret_cast<PWPG_ARGS>( wParam );
-			PWPG_THREAD_PROPS pThreadProps = reinterpret_cast<PWPG_THREAD_PROPS>(
-				GetWindowLongPtr( hWnd, GWLP_USERDATA )
-			);
-			if (pThreadProps && pThreadProps->wpg){
-				// Allocate the output structure
-				PWPGGenerated pWPGGenerated = static_cast<PWPGGenerated>( PH_ALLOC( sizeof( WPGGenerated ) ) );
-				pWPGGenerated->cchPwd = pArgs->cchLength;
-				pWPGGenerated->pszPwd = static_cast<LPCTSTR>( PH_ALLOC( sizeof( TCHAR ) * (pWPGGenerated->cchPwd + 1) ) );
-
-				// Do the password generation
-				auto wpg = pThreadProps->wpg;
-				pWPGGenerated->wpgCapsFailed = wpg->Generate(
-					const_cast<LPTSTR>( pWPGGenerated->pszPwd ),
-					pWPGGenerated->cchPwd,
-					pArgs->wpgCaps,
-					&(pWPGGenerated->cchPwd),
-					pArgs->pszAlphabet,
-					pArgs->fDuplicates
-				);
-
-#if defined (_DEBUG)
-				if (pWPGGenerated->wpgCapsFailed == WPGCapNONE){
-					OutputDebugString( TEXT( "Generator thread generated password: " ) );
-					OutputDebugString( pWPGGenerated->pszPwd );
-					OutputDebugString( TEXT( "\x0A" ) );
-				}else{
-					OutputDebugString( TEXT( "Failed to generate password in generator thread\x0A" ) );
-				}
-#endif
-
-				// Send the output to the main thread
-				PostMessage(
-					pThreadProps->hWnd,
-					AWM_WPG_GENERATED,
-					reinterpret_cast<WPARAM>( pWPGGenerated ),
-					lParam
-				);
-			}
-
-			// Cleanup
-			PH_FREE( const_cast<LPTSTR>( pArgs->pszAlphabet ) );
-			PH_FREE( pArgs );
-		}
+			OnGeneratePassword( hWnd, wParam, lParam );
 			break;
 
 		case AWM_WPG_STOP:
-		{
 #if defined (_DEBUG)
 			OutputDebugString( TEXT( "AWM_WPG_STOP\x0D" ) );
 #endif
-			// Cleanup the password generator
-			PWPG_THREAD_PROPS pThreadProps = reinterpret_cast<PWPG_THREAD_PROPS>(
-				GetWindowLongPtr( hWnd, GWLP_USERDATA )
-			);
-			if (pThreadProps){
-				pThreadProps->wpg.reset( );
-			}
-		}
 			break;
 
 		// All other messages
@@ -315,4 +341,95 @@ LRESULT CALLBACK WPGGeneratorWindowProcedure(HWND hWnd, UINT uMessage, WPARAM wP
 			break;
 	}
 	return lResult;
+}
+
+HRESULT OnGeneratePassword(HWND hWnd, WPARAM wParam, LPARAM lParam) {
+
+	// Unpack the arguments
+	PWPG_THREAD_PROPS pThreadProps = reinterpret_cast<PWPG_THREAD_PROPS>(
+		GetWindowLongPtr( hWnd, GWLP_USERDATA )
+	);
+	if (pThreadProps && pThreadProps->wpg){
+		// Setup
+		const BYTE cchLength = static_cast<BYTE>( wParam );
+		const WPGCaps wpgCaps = static_cast<WPGCaps>( lParam );
+		const BOOL fEmpty = (pThreadProps->pszAlphabet == NULL) || (pThreadProps->cchAlphabet < 1);
+		BYTE cch = fEmpty ? 0 : min( cchLength, pThreadProps->cchMax );
+
+		// Do the password generation
+		WPGCaps wpgCapsFailed = pThreadProps->wpg->Generate(
+			pThreadProps->pszBuffer,
+			cch,
+			wpgCaps,
+			&(cch),
+			pThreadProps->pszAlphabet,
+			pThreadProps->fDuplicatesAllowed
+		);
+
+#if defined (_DEBUG)
+		if (wpgCapsFailed == WPGCapNONE){
+			OutputDebugString( TEXT( "Generator thread generated password: " ) );
+			OutputDebugString( pThreadProps->pszBuffer );
+			OutputDebugString( TEXT( "\x0A" ) );
+		}else{
+			OutputDebugString( TEXT( "Failed to generate password in generator thread\x0A" ) );
+		}
+#endif
+
+		// Send to the target window (synchronously)
+		SendMessage(
+			pThreadProps->hWnd,
+			AWM_WPG_GENERATED,
+			reinterpret_cast<WPARAM>( pThreadProps->pszBuffer ),
+			static_cast<LPARAM>( wpgCapsFailed )
+		);
+		SecureZeroMemory( pThreadProps->pszBuffer, pThreadProps->cchMax );
+		return S_OK;
+	}
+	return E_POINTER;
+}
+
+HRESULT OnSetPwdAlphabet(HWND hWnd, WPARAM wParam, LPARAM lParam) {
+
+	PWPG_THREAD_PROPS pThreadProps = reinterpret_cast<PWPG_THREAD_PROPS>(
+		GetWindowLongPtr( hWnd, GWLP_USERDATA )
+	);
+	if (pThreadProps){
+		// Release the existing alphabet, if any
+		if (pThreadProps->pszAlphabet){
+			PH_FREE( const_cast<LPTSTR>( pThreadProps->pszAlphabet ) );
+		}
+
+		// Just accept the pointer
+		pThreadProps->pszAlphabet = reinterpret_cast<LPTSTR>( wParam );
+		pThreadProps->cchAlphabet = static_cast<BYTE>( lParam );
+#if defined (_DEBUG)
+		OutputDebugString( TEXT( "Password alphabet set to: " ) );
+		OutputDebugString( pThreadProps->pszAlphabet );
+		OutputDebugString( TEXT( "\x0A" ) );
+#endif
+		return S_OK;
+	}
+	return S_FALSE;
+}
+
+HRESULT OnEnablePwdDuplicates(HWND hWnd, WPARAM wParam, LPARAM lParam) {
+
+	PWPG_THREAD_PROPS pThreadProps = reinterpret_cast<PWPG_THREAD_PROPS>(
+		GetWindowLongPtr( hWnd, GWLP_USERDATA )
+	);
+	if (pThreadProps){
+		pThreadProps->fDuplicatesAllowed = static_cast<BOOL>( wParam );
+#if defined (_DEBUG)
+		OutputDebugString( TEXT( "Duplicates enabled: " ) );
+		if (pThreadProps->fDuplicatesAllowed){
+			OutputDebugString( TEXT( "TRUE" ) );
+		}else{
+			OutputDebugString( TEXT( "FALSE" ) );
+		}
+		OutputDebugString( TEXT( "\x0A" ) );
+#endif
+		return S_OK;
+	}
+	return S_FALSE;
 }

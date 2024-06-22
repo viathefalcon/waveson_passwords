@@ -12,48 +12,38 @@
 
 // Local Project Headers
 #include "WPGAboutEtc.h"
-#include "WPGGenerator.h"
 #include "WPGRegistry.h"
 
 // Macros
 //
 
-// Defines a Windows message which, when sent to the main window, causes it to generate a new password
+// Custom Windows messages we post to ourselves
 #define UWM_REFRESH				(AWM_WPG_STOPPED+1L)
+#define UWM_COPY				(UWM_REFRESH+1L)
 
 // Constants
 //
 
-// Identifies the timer
-const UINT c_uTimer = 123L;
+// Identifies the termination timer
+const UINT c_uTerminationTimer = 123U;
+
+// Identifies the clipboard timer
+const UINT c_uClipboardTimer = 321U;
+
+// Specifies the intervals for the timers
+const UINT c_uTerminationTimerElapseMinimum = 1U;
+const UINT c_uClipboardTimerElapse = 3000U;
 
 // Specifies the minimum, maximum and default lengths of generated passwords
-const BYTE c_cbMinLength = 0x01;
-const BYTE c_cbMaxLength = 0xFF;
-const BYTE c_cbDefaultLength = 0x10;
-
-// Specifies the intervals for the timer
-const UINT c_uTimerElapseDefault = 1000U;
-const UINT c_uTimerElapseMinimum = 1U;
+const BYTE c_cchMinLength = 0x01;
+const BYTE c_cchMaxLength = 0xFF;
+const BYTE c_cchDefaultLength = 0x10;
 
 const DWORD c_dwRDRANDCheck = 0x80000000;
 const DWORD c_dwTPMCheck = 0x00800000;
 const DWORD c_dwAutoCopyCheck = 0x00008000;
 const DWORD c_dwDuplicatesCheck = 0x00000800;
 const DWORD c_dwDefaultChecks = (c_dwRDRANDCheck | c_dwTPMCheck | c_dwDuplicatesCheck);
-
-// Types
-//
-
-typedef struct _UIState {
-
-	WPGCaps wpgCaps;
-	WPG_H wpgHandle;
-
-	DWORD dwTooltips;
-	HWND* phTooltips;
-
-} UIState, *UIStatePtr;
 
 // Globals
 //
@@ -83,13 +73,25 @@ HRESULT OnCopy(HWND);
 HRESULT OnRefresh(HWND);
 
 // Called when a new password has been generated
-HRESULT OnPwdGenerated(HWND, UINT_PTR);
+HRESULT OnPwdGenerated(HWND, WPARAM, LPARAM);
 
 // Called when the main dialog is closed
 HRESULT OnClose(HWND);
 
+// Called when the timer for the clipboard fires
+HRESULT OnClipboardTimerElapsed(HWND);
+
+// Called when the generator thread has started
+HRESULT OnGeneratorStarted(HWND, WPARAM, LPARAM);
+
 // Called when the generator thread has stopped
 HRESULT OnGeneratorStopped(HWND);
+
+// Called when the alphabet changes, and needs to be sent to the generator
+HRESULT OnPwdAlphabetChanged(HWND);
+
+// Called when the toggle to enable/disable duplicates changes
+HRESULT OnEnableDuplicatesChanged(HWND);
 
 // Returns TRUE if the contents of the input control are the default; FALSE otherwise
 LPTSTR NonDefaultAlphabet(HWND);
@@ -129,7 +131,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
 		g_hIcon = reinterpret_cast<HICON>( LoadImage( hInstance, MAKEINTRESOURCE( IDI_WAVESON ), IMAGE_ICON, GetSystemMetrics( SM_CXSMICON ), GetSystemMetrics( SM_CYSMICON ), 0 ) );
 
 		// Register the message
-		g_uwmTaskbarButtonCreated = RegisterWindowMessage( L"TaskbarButtonCreated" ); 
+		g_uwmTaskbarButtonCreated = RegisterWindowMessage( L"TaskbarButtonCreated" );
 
 		// Display the dialog box
 		const INT_PTR nResult = DialogBoxParam(
@@ -157,7 +159,6 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 
 	BOOL bResult = TRUE;
 	switch (uMsg){
-
 		// The dialog was initialised
 		case WM_INITDIALOG:
 			bResult = SUCCEEDED( OnInitDialog( hDlg ) );
@@ -210,6 +211,13 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 					break;
 
 				case IDC_CHECK_ALLOW_DUPLICATES:
+					if (HIWORD( wParam ) == BN_CLICKED){
+						OnEnableDuplicatesChanged( hDlg );
+					}
+
+					// Fall through
+					;
+
 				case IDC_CHECK_RDRAND:
 				case IDC_CHECK_TPM:
 					if (HIWORD( wParam ) == BN_CLICKED){
@@ -218,12 +226,9 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 					break;
 
 				case IDC_EDIT_INPUT:
-					// If the contents of the input have changed,
-					// then check whether the 'Allow duplicates...'
-					// checkbox should/should not be ticked
 					switch (HIWORD( wParam )){
 						case EN_CHANGE:
-							AutoCheckDuplicatesAndRefresh( hDlg );
+							OnPwdAlphabetChanged( hDlg );
 							break;
 
 						default:
@@ -246,13 +251,17 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 		// A timer fired
 		case WM_TIMER:
 			switch (wParam){
-				case c_uTimer:
+				case c_uTerminationTimer:
 					// Kill the timer
 					KillTimer( hDlg, uTimer );
 					uTimer = 0L;
 
 					// Kill the dialog
 					EndDialog( hDlg, TRUE );
+					break;
+
+				case c_uClipboardTimer:
+					bResult = SUCCEEDED( OnClipboardTimerElapsed( hDlg ) );
 					break;
 
 				default:
@@ -269,7 +278,13 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 				case NM_RETURN:
 				{
 					HINSTANCE hInstance = reinterpret_cast<HINSTANCE>( GetWindowLongPtr( hDlg, GWLP_HINSTANCE ) );
-					DialogBox( hInstance, MAKEINTRESOURCE( IDD_ABOUT ), hDlg, AboutDialogProc );
+					DialogBoxParam(
+						hInstance,
+						MAKEINTRESOURCE( IDD_ABOUT ),
+						hDlg,
+						AboutDialogProc,
+						GetWindowLongPtr( hDlg, GWLP_USERDATA )
+					);
 				}
 					bResult = TRUE;
 					break;
@@ -282,17 +297,11 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 			break;
 
 		case AWM_WPG_STARTED:
-			OutputDebugString( TEXT( "AWM_WPG_STARTED\x0D" ) );
-
-			// Fall through
-			;
-
-		case UWM_REFRESH:
-			OnRefresh( hDlg );
+			OnGeneratorStarted( hDlg, wParam, lParam );
 			break;
 
 		case AWM_WPG_GENERATED:
-			OnPwdGenerated( hDlg, wParam );
+			OnPwdGenerated( hDlg, wParam, lParam );
 			break;
 
 		case AWM_WPG_STOPPED:
@@ -303,8 +312,20 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 			if (uTimer != 0L){
 				KillTimer( hDlg, uTimer );
 			}
-			uTimer = SetTimer( hDlg, c_uTimer, c_uTimerElapseMinimum, NULL );
+			uTimer = SetTimer( hDlg, c_uTerminationTimer, c_uTerminationTimerElapseMinimum, NULL );
 		}
+			break;
+
+		case UWM_REFRESH:
+			OnRefresh( hDlg );
+			break;
+
+		case UWM_COPY:
+			bResult = SUCCEEDED( OnCopy( hDlg ) );
+			if (!bResult){
+				// Automatically disable the auto-copy, if only to stop the same error dialog appearing repeatedly
+				CheckDlgButton( hDlg, IDC_CHECK_AUTO_COPY, BST_UNCHECKED );
+			}
 			break;
 
 		default:
@@ -362,11 +383,8 @@ HRESULT OnCreateTooltips(HWND hDlg) {
 
 HRESULT OnInitDialog(HWND hDlg) {
 
-	// Initialise the shared password generator
-	InitWPG( );
-
 	// Kick off the generator thread
-	WPG_H wpgHandle = StartWPGGenerator( hDlg );
+	WPG_H wpgHandle = StartWPGGenerator( hDlg, c_cchMaxLength );
 
 	// Set the icon, c.f. https://support.microsoft.com/en-us/help/179582/how-to-set-the-title-bar-icon-in-a-dialog-box
 	if (g_hIcon){
@@ -374,14 +392,11 @@ HRESULT OnInitDialog(HWND hDlg) {
 	}
 
 	LPTSTR pszAlphabet = NULL;
-	DWORD dwLength = c_cbDefaultLength, dwChecks = c_dwDefaultChecks;
+	DWORD dwLength = c_cchDefaultLength, dwChecks = c_dwDefaultChecks;
 	HKEY hKey = NULL;
 	if (SUCCEEDED( WPGRegOpenKey( &hKey ) )){
 		if (FAILED( WPGRegGetDWORD( &dwLength, hKey, WPGRegLength ) )){
-			dwLength = c_cbDefaultLength;
-		}
-		if (FAILED( WPGRegGetDWORD( &dwChecks, hKey, WPGRegChecks ) ) || (dwChecks == 0)){
-			dwChecks = c_dwDefaultChecks;
+			dwLength = c_cchDefaultLength;
 		}
 		if (FAILED( WPGRegGetString( &pszAlphabet, hKey, WPGRegAlphabet ) )){
 			pszAlphabet = NULL;
@@ -391,34 +406,9 @@ HRESULT OnInitDialog(HWND hDlg) {
 
 	// Configure the slider
 	HWND hSlider = GetDlgItem( hDlg, IDC_SLIDER_OUTPUT );
-	SendMessage( hSlider, TBM_SETRANGE, TRUE, MAKELPARAM( c_cbMinLength, c_cbMaxLength ) );
-	SendMessage( hSlider, TBM_SETTICFREQ, (c_cbDefaultLength - 1), 0 );
+	SendMessage( hSlider, TBM_SETRANGE, TRUE, MAKELPARAM( c_cchMinLength, c_cchMaxLength ) );
+	SendMessage( hSlider, TBM_SETTICFREQ, (c_cchDefaultLength - 1), 0 );
 	SendMessage( hSlider, TBM_SETPOS, TRUE, dwLength );
-
-	// Get the 'capabilities' of the password generator
-	const WPGCaps caps = WPGGetCaps( );
-	UINT uCheckRDRAND = BST_UNCHECKED;
-	if (caps & WPGCapRDRAND){
-		EnableWindow( GetDlgItem( hDlg, IDC_CHECK_RDRAND ), TRUE );
-		uCheckRDRAND = (dwChecks & c_dwRDRANDCheck) ? BST_CHECKED : BST_UNCHECKED;
-		CheckDlgButton( hDlg, IDC_CHECK_RDRAND, uCheckRDRAND );
-	}
-	UINT uCheckTPM = BST_UNCHECKED;
-	if (caps & (WPGCapTPM12 | WPGCapTPM20)){
-		EnableWindow( GetDlgItem( hDlg, IDC_CHECK_TPM ), TRUE );
-		uCheckTPM = (dwChecks & c_dwTPMCheck) ? BST_CHECKED : BST_UNCHECKED;
-		CheckDlgButton( hDlg, IDC_CHECK_TPM, uCheckTPM );
-	}
-	CheckDlgButton(
-		hDlg,
-		IDC_CHECK_AUTO_COPY,
-		(dwChecks & c_dwAutoCopyCheck) ? BST_CHECKED : BST_UNCHECKED
-	);
-	CheckDlgButton(
-		hDlg,
-		IDC_CHECK_ALLOW_DUPLICATES,
-		(dwChecks & c_dwDuplicatesCheck) ? BST_CHECKED : BST_UNCHECKED
-	);
 
 	// Seed the input from registry, above, (or resources) and do the initial 'refresh'
 	if (pszAlphabet){
@@ -429,12 +419,8 @@ HRESULT OnInitDialog(HWND hDlg) {
 		OnReset( hDlg );
 	}
 
-	const BOOL bEnable = (uCheckRDRAND == BST_CHECKED) || (uCheckTPM == BST_CHECKED);
-	EnableWindow( GetDlgItem( hDlg, IDC_BUTTON_REFRESH ), bEnable );
-
 	// Initialise the UI state
 	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( PH_ALLOC( sizeof( UIState ) ) );
-	uiStatePtr->wpgCaps = caps;
 	uiStatePtr->wpgHandle = wpgHandle;
 	SetWindowLongPtr( hDlg, GWLP_USERDATA, reinterpret_cast<LONG_PTR>( uiStatePtr ) );
 	return OnCreateTooltips( hDlg );
@@ -465,10 +451,21 @@ HRESULT OnCopy(HWND hDlg) {
 	SecureZeroMemory( pszShared, cbOutput );
 	GetWindowText( hOutput, pszShared, cchOutput );
 
+	// Open the clipboard, if it isn't already
+	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
+	BOOL bOpened = uiStatePtr->fClipboardOpen;
+	if (!bOpened){
+		bOpened = OpenClipboard( hDlg );
+	}
+	if (bOpened){
+		// Set/renew the timer
+		SetTimer( hDlg, c_uClipboardTimer, c_uClipboardTimerElapse, NULL );
+	}
+	uiStatePtr->fClipboardOpen = bOpened;
+
 	// Put the text on the clipboard
 	HRESULT hResult = E_FAIL;
 	GlobalUnlock( hGlobal );
-	BOOL bOpened = OpenClipboard( hDlg );
 	if (bOpened){
 		EmptyClipboard( );
 #if defined (UNICODE)
@@ -492,7 +489,6 @@ HRESULT OnCopy(HWND hDlg) {
 #endif
 			hResult = HRESULT_FROM_WIN32( GetLastError( ) );
 		}
-		CloseClipboard( );
 	}else{
 		const DWORD dwLastError = GetLastError( );
 		TCHAR szBuf[MAX_PATH] = { 0 };
@@ -510,12 +506,12 @@ HRESULT OnCopy(HWND hDlg) {
 
 HRESULT OnRefresh(HWND hDlg) {
 
-	// Setup
-	HWND hInput = GetDlgItem( hDlg, IDC_EDIT_INPUT );
-	const int cchAlphabet = GetWindowTextLength( hInput );
-
 	// Find the intersection between the available generators and the ones the user has selected
 	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
+	if (uiStatePtr == NULL){
+		return E_POINTER;
+	}
+
 	WPGCaps caps = uiStatePtr->wpgCaps;
 	if (!IsDlgButtonChecked( hDlg, IDC_CHECK_RDRAND )){
 		caps &= ~WPGCapRDRAND;
@@ -526,7 +522,7 @@ HRESULT OnRefresh(HWND hDlg) {
 
 	// Look for an early out
 	HWND hOut = GetDlgItem( hDlg, IDC_EDIT_OUTPUT );
-	if ((caps == WPGCapNONE) || (cchAlphabet == 0)){
+	if ((caps == WPGCapNONE)){
 		SetWindowText( hOut, TEXT( "" ) );
 		return S_OK;
 	}
@@ -537,49 +533,31 @@ HRESULT OnRefresh(HWND hDlg) {
 	HANDLE hProcessHeap = GetProcessHeap( );
 	LPTSTR pszPwd = static_cast<LPTSTR>( HeapAlloc( hProcessHeap, HEAP_ZERO_MEMORY, sizeof( TCHAR ) * (cchPwd+1) ) );
 
-	// Get a copy of the input alphabet
-	LPTSTR pszAlphabet = static_cast<LPTSTR>( HeapAlloc( hProcessHeap, HEAP_ZERO_MEMORY, sizeof( TCHAR ) * (cchAlphabet+1) ) );
-	GetWindowText( hInput, pszAlphabet, cchAlphabet );
-
 	// Send to the generator thread
 	WPG_H wpgHandle = (uiStatePtr) ? uiStatePtr->wpgHandle : NULL;
 	if (wpgHandle){
-		const BOOL fDuplicatesAllowed = IsDlgButtonChecked( hDlg, IDC_CHECK_ALLOW_DUPLICATES );
-		WPGPwdGenAsync( wpgHandle, cchPwd, caps, pszAlphabet, cchAlphabet, fDuplicatesAllowed );
+		WPGPwdGenAsync( wpgHandle, cchPwd, caps );
 		return S_OK;
 	}
 	return E_POINTER;
 }
 
-HRESULT OnPwdGenerated(HWND hDlg, UINT_PTR uPtr) {
+HRESULT OnPwdGenerated(HWND hDlg, WPARAM wParam, LPARAM lParam) {
 
-	PWPGGenerated pWPGGenerated = reinterpret_cast<PWPGGenerated>( uPtr );
-	if (pWPGGenerated){
-		const WPGCaps wpgCapsFailed = pWPGGenerated->wpgCapsFailed;
-		HRESULT hResult = (wpgCapsFailed == WPGCapNONE) ? S_OK : E_FAIL;
-		if (SUCCEEDED( hResult )){
-			// Set the output
-			SetWindowText( GetDlgItem( hDlg, IDC_EDIT_OUTPUT ), pWPGGenerated->pszPwd );
-			if (IsDlgButtonChecked( hDlg, IDC_CHECK_AUTO_COPY )){
-				if FAILED( OnCopy( hDlg ) ){
-					// Automatically disable the auto-copy, if only to stop the same error dialog appearing repeatedly
-					CheckDlgButton( hDlg, IDC_CHECK_AUTO_COPY, BST_UNCHECKED );
-				}
-			}
-		}else{
-			SetErrorMsg( hDlg, wpgCapsFailed );
+	const WPGCaps wpgCapsFailed = static_cast<WPGCaps>( lParam );
+	HRESULT hResult = (wpgCapsFailed == WPGCapNONE) ? S_OK : E_FAIL;
+	if (SUCCEEDED( hResult )){
+		LPCTSTR pszPwd = reinterpret_cast<LPCTSTR>( wParam );
+
+		// Set the output
+		SetWindowText( GetDlgItem( hDlg, IDC_EDIT_OUTPUT ), pszPwd );
+		if (IsDlgButtonChecked( hDlg, IDC_CHECK_AUTO_COPY )){
+			PostMessage( hDlg, UWM_COPY, 0U, 0U );
 		}
-
-		// Cleanup
-		SecureZeroMemory(
-			const_cast<LPTSTR>( pWPGGenerated->pszPwd ),
-			sizeof( TCHAR ) * (pWPGGenerated->cchPwd)
-		);
-		PH_FREE( const_cast<LPTSTR>( pWPGGenerated->pszPwd ) );
-		PH_FREE( pWPGGenerated );
-		return hResult;
+	}else{
+		SetErrorMsg( hDlg, wpgCapsFailed );
 	}
-	return E_INVALIDARG;
+	return hResult;
 }
 
 HRESULT OnClose(HWND hDlg) {
@@ -588,15 +566,125 @@ HRESULT OnClose(HWND hDlg) {
 	WPG_H wpgHandle = (uiStatePtr) ? uiStatePtr->wpgHandle : NULL;
 	if (wpgHandle){
 		StopWPGGenerator( wpgHandle );
-		return S_OK;
 	}
-	return OnGeneratorStopped( hDlg );
+	return S_OK;
+}
+
+HRESULT OnPwdAlphabetChanged(HWND hDlg) {
+
+	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
+	WPG_H wpgHandle = (uiStatePtr) ? uiStatePtr->wpgHandle : NULL;
+	if (wpgHandle == NULL){
+		// Bail
+		return S_FALSE;
+	}
+
+	// Get a copy of the input alphabet
+	HWND hInput = GetDlgItem( hDlg, IDC_EDIT_INPUT );
+	const int cchAlphabet = GetWindowTextLength( hInput );
+	LPTSTR pszAlphabet = (cchAlphabet > 0)
+		? static_cast<LPTSTR>( PH_ALLOC( sizeof( TCHAR ) * (cchAlphabet+1) ) )
+		: NULL;
+	if (pszAlphabet){
+		GetWindowText( hInput, pszAlphabet, (cchAlphabet+1) );
+
+		// Set it at the generator thread
+		SetPwdAlphabetAsync( wpgHandle, pszAlphabet, static_cast<BYTE>( cchAlphabet ) );
+		PH_FREE( pszAlphabet );
+	}
+	AutoCheckDuplicatesAndRefresh( hDlg );
+	return S_OK;
+}
+
+HRESULT OnEnableDuplicatesChanged(HWND hDlg) {
+
+	// Get the status
+	const BOOL fDuplicatesAllowed = IsDlgButtonChecked( hDlg, IDC_CHECK_ALLOW_DUPLICATES );
+
+	// Pass onto the generator
+	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
+	WPG_H wpgHandle = (uiStatePtr) ? uiStatePtr->wpgHandle : NULL;
+	if (wpgHandle){
+		EnablePwdDuplicatesAsync( wpgHandle, fDuplicatesAllowed );
+	}
+	return S_OK;
+}
+
+HRESULT OnClipboardTimerElapsed(HWND hDlg) {
+
+	// Kill the timer and close the clipboard
+	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
+	if (uiStatePtr->fClipboardOpen){
+		KillTimer( hDlg, c_uClipboardTimer );
+		uiStatePtr->fClipboardOpen = !CloseClipboard( );
+	}
+	return S_OK;
+}
+
+HRESULT OnGeneratorStarted(HWND hDlg, WPARAM wParam, LPARAM lParam) {
+
+	OutputDebugString( TEXT( "AWM_WPG_STARTED\x0D" ) );
+
+	// Set the initial state
+	OnEnableDuplicatesChanged( hDlg );
+	OnPwdAlphabetChanged( hDlg );
+
+	// Capture the properties of the generator
+	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
+	uiStatePtr->wpgCaps = static_cast<WPGCaps>( wParam );
+	uiStatePtr->wpgVex = static_cast<XORVex>( lParam );
+
+	// Update the state of the UI
+	DWORD dwChecks = c_dwDefaultChecks;
+	HKEY hKey = NULL;
+	if (SUCCEEDED( WPGRegOpenKey( &hKey ) )){
+		if (FAILED( WPGRegGetDWORD( &dwChecks, hKey, WPGRegChecks ) ) || (dwChecks == 0)){
+			dwChecks = c_dwDefaultChecks;
+		}
+		WPGRegCloseKey( hKey );
+	}
+
+	const WPGCaps caps = uiStatePtr->wpgCaps;
+	UINT uCheckRDRAND = BST_UNCHECKED;
+	if (caps & WPGCapRDRAND){
+		EnableWindow( GetDlgItem( hDlg, IDC_CHECK_RDRAND ), TRUE );
+		uCheckRDRAND = (dwChecks & c_dwRDRANDCheck) ? BST_CHECKED : BST_UNCHECKED;
+		CheckDlgButton( hDlg, IDC_CHECK_RDRAND, uCheckRDRAND );
+	}
+	UINT uCheckTPM = BST_UNCHECKED;
+	if (caps & (WPGCapTPM12 | WPGCapTPM20)){
+		EnableWindow( GetDlgItem( hDlg, IDC_CHECK_TPM ), TRUE );
+		uCheckTPM = (dwChecks & c_dwTPMCheck) ? BST_CHECKED : BST_UNCHECKED;
+		CheckDlgButton( hDlg, IDC_CHECK_TPM, uCheckTPM );
+	}
+	CheckDlgButton(
+		hDlg,
+		IDC_CHECK_AUTO_COPY,
+		(dwChecks & c_dwAutoCopyCheck) ? BST_CHECKED : BST_UNCHECKED
+	);
+	CheckDlgButton(
+		hDlg,
+		IDC_CHECK_ALLOW_DUPLICATES,
+		(dwChecks & c_dwDuplicatesCheck) ? BST_CHECKED : BST_UNCHECKED
+	);
+
+	// If generated via RDRAND or TPM is available to us, enable the button
+	const BOOL bEnable = (uCheckRDRAND == BST_CHECKED) || (uCheckTPM == BST_CHECKED);
+	EnableWindow( GetDlgItem( hDlg, IDC_BUTTON_REFRESH ), bEnable );
+
+	// Now that we know about the capabilities of the generator, we can enable the link to the About dialog
+	EnableWindow( GetDlgItem( hDlg, IDC_SYSLINK1 ), TRUE );
+	return S_OK;
 }
 
 HRESULT OnGeneratorStopped(HWND hDlg) {
 
 	OutputDebugString( TEXT( "AWM_WPG_STOPPED\x0D" ) );
 
+	// Don't need the clipboard anymore
+	OnClipboardTimerElapsed( hDlg );
+
+	// Record the UI state
 	HKEY hKey = NULL;
 	HRESULT hResult = WPGRegOpenKey( &hKey );
 	if (SUCCEEDED( hResult )){
@@ -625,14 +713,13 @@ HRESULT OnGeneratorStopped(HWND hDlg) {
 	// Cleanup the UI state
 	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
 	if (uiStatePtr){
+		CleanupWPGGenerator( uiStatePtr->wpgHandle );
+
 		for (DWORD dw = 0; dw < uiStatePtr->dwTooltips; ++dw){
 			DestroyWindow( *(uiStatePtr->phTooltips + dw) );
 		}
 		PH_FREE( uiStatePtr );
 	}
-
-	// Tidy up and return
-	ReleaseWPG( );
 	return S_OK;
 }
 
@@ -713,6 +800,7 @@ VOID AutoCheckDuplicatesAndRefresh(HWND hDlg) {
 			IDC_CHECK_ALLOW_DUPLICATES,
 			BST_CHECKED
 		);
+		OnEnableDuplicatesChanged( hDlg );
 		fEnabled = FALSE;
 	}
 	EnableWindow( GetDlgItem( hDlg, IDC_CHECK_ALLOW_DUPLICATES ), fEnabled );
