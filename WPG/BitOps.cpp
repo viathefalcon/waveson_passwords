@@ -18,7 +18,9 @@
 
 // Microsoft-specific Intrinsics Headers
 #include <intrin.h>
+#if !defined(_M_ARM64)
 #include <xmmintrin.h>
+#endif  //!defined(_M_ARM64)
 
 // Local Project Headers
 #include "BitOps.h"
@@ -54,6 +56,7 @@ public:
 };
 #endif // _WIN64
 
+#if !defined(_M_ARM64)
 class sse_xor_t : public xor_t {
 public:
 	size_type apply(operand_type front, operand_type back, size_type cb) const {
@@ -128,6 +131,7 @@ public:
 		return XORVexAVX;
 	}
 };
+#endif  //!defined(_M_ARM64)
 
 // Functions
 //
@@ -209,6 +213,7 @@ std::string get_cpu_vendor(int cpuid[]) {
 
 std::unique_ptr<xor_t> get_vex_xor_impl(void) {
 
+#if !defined(_M_ARM64)
 	// Get the CPU ID
 	int info[4] = { -1, -1, -1, -1 };
 	__cpuid(info, 0);
@@ -249,6 +254,7 @@ std::unique_ptr<xor_t> get_vex_xor_impl(void) {
 		}
 #endif // _WIN64
 	}
+#endif // !defined(_M_ARM64)
 
 	// If we get here, just return the default implementation
 	return std::make_unique<xor_t>( );
