@@ -16,9 +16,11 @@
 #include <array>
 #include <algorithm>
 
-// Microsoft-specific Intrinsics Headers
+// Intrinsics Headers
 #include <intrin.h>
-#if !defined(_M_ARM64)
+#if defined(_M_ARM64)
+#include <arm_neon.h>
+#else
 #include <xmmintrin.h>
 #endif  //!defined(_M_ARM64)
 
@@ -56,7 +58,38 @@ public:
 };
 #endif // _WIN64
 
-#if !defined(_M_ARM64)
+#if defined(_M_ARM64)
+class neon_xor_t : public xor_t {
+public:
+	size_type apply(operand_type front, operand_type back, size_type cb) const {
+
+		const size_t s = sizeof( uint8x16_t );
+		for (decltype(cb) i = 0; i < cb; ) {
+			const decltype(cb) j = (cb - i);
+			if (j < s){
+				// Fallback
+				xor_t::apply( front + i, back + i, j );
+				i += j;
+			}else{
+				// Load
+				uint8x16_t u = vld1q_u8( front + i );
+				uint8x16_t v = vld1q_u8( back + i );
+
+				// Apply and store
+				vst1q_u8( front + i, veorq_u8( u, v ) );
+
+				// Advance
+				i += s;
+			}
+		}
+		return cb;
+	}
+
+	XORVex vex() const {
+		return XORVexNEON;
+	}
+};
+#else
 class sse_xor_t : public xor_t {
 public:
 	size_type apply(operand_type front, operand_type back, size_type cb) const {
@@ -131,7 +164,7 @@ public:
 		return XORVexAVX;
 	}
 };
-#endif  //!defined(_M_ARM64)
+#endif // defined(_M_ARM64)
 
 // Functions
 //
@@ -213,7 +246,9 @@ std::string get_cpu_vendor(int cpuid[]) {
 
 std::unique_ptr<xor_t> get_vex_xor_impl(void) {
 
-#if !defined(_M_ARM64)
+#if defined(_M_ARM64)
+	return std::make_unique<neon_xor_t>( );
+#else
 	// Get the CPU ID
 	int info[4] = { -1, -1, -1, -1 };
 	__cpuid(info, 0);

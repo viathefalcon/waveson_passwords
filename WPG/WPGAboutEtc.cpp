@@ -99,6 +99,10 @@ BOOL OnInitAboutDialog(HWND hDlg, WPARAM WParam, LPARAM lParam) {
 			uID = IDS_USING_VEX_AVX;
 			break;
 
+		case XORVexNEON:
+			uID = IDS_USING_VEX_ARM_NEON;
+			break;
+
 		default:
 			// Do nothing
 			break;
