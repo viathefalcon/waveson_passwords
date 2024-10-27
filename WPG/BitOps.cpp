@@ -94,18 +94,25 @@ class sse_xor_t : public xor_t {
 public:
 	size_type apply(operand_type front, operand_type back, size_type cb) const {
 
-		for (decltype(cb) i = 0; i < cb; ){
-			const decltype(i) j = min( (cb - i), sizeof( __m128 ) );
+		const size_t s = sizeof( __m128 );
+		for (decltype(cb) i = 0; i < cb; ) {
+			const decltype(cb) j = (cb - i);
+			if (j < s){
+				// Fallback
+				xor_t::apply( front + i, back + i, j );
+				i += j;
+			}else{
+				// Load
+				auto f = reinterpret_cast<float*>( front + i );
+				__m128 u = _mm_loadu_ps( f );
+				__m128 v = _mm_loadu_ps( reinterpret_cast<const float*>( back + i ) );
 
-			// Get the next chunk
-			__m128 m1 = { 0 }, m2 = { 0 };
-			memcpy( &m1, (front + i), j );
-			memcpy( &m2, (back + i), j );
+				// Apply and store
+				_mm_storeu_ps( f, _mm_xor_ps( u, v ) );
 
-			// Apply, and copy out
-			__m128 m3 = _mm_xor_ps( m1, m2 );
-			memcpy( (front + i), &m3, j );
-			i += j;
+				// Advance
+				i += s;
+			}
 		}
 		return cb;
 	}
@@ -119,18 +126,25 @@ class sse2_xor_t : public xor_t {
 public:
 	size_type apply(operand_type front, operand_type back, size_type cb) const {
 
-		for (decltype(cb) i = 0; i < cb; ){
-			const decltype(i) j = min( (cb - i), sizeof( __m128i  ) );
+		const size_t s = sizeof( __m128i );
+		for (decltype(cb) i = 0; i < cb; ) {
+			const decltype(cb) j = (cb - i);
+			if (j < s){
+				// Fallback
+				xor_t::apply( front + i, back + i, j );
+				i += j;
+			}else{
+				// Load
+				auto f = reinterpret_cast<__m128i*>( front + i );
+				__m128i u = _mm_loadu_si128( f );
+				__m128i v = _mm_loadu_si128( reinterpret_cast<__m128i*>( back + i ) );
 
-			// Get the next chunk
-			__m128i  m1 = { 0 }, m2 = { 0 };
-			memcpy( &m1, (front + i), j );
-			memcpy( &m2, (back + i), j );
+				// Apply and store
+				_mm_storeu_si128( f, _mm_xor_si128( u, v ) );
 
-			// Apply, and copy out
-			__m128i  m3 = _mm_xor_si128( m1, m2 );
-			memcpy( (front + i), &m3, j );
-			i += j;
+				// Advance
+				i += s;
+			}
 		}
 		return cb;
 	}
@@ -144,18 +158,25 @@ class avx_xor_t : public xor_t {
 public:
 	size_type apply(operand_type front, operand_type back, size_type cb) const {
 
-		for (decltype(cb) i = 0; i < cb; ){
-			const decltype(i) j = min( (cb - i), sizeof( __m256 ) );
+		const size_t s = sizeof( __m256 );
+		for (decltype(cb) i = 0; i < cb; ) {
+			const decltype(cb) j = (cb - i);
+			if (j < s){
+				// Fallback
+				xor_t::apply( front + i, back + i, j );
+				i += j;
+			}else{
+				// Load
+				auto f = reinterpret_cast<float*>( front + i );
+				__m256 u = _mm256_loadu_ps( f );
+				__m256 v = _mm256_loadu_ps( reinterpret_cast<float*>( back + i ) );
 
-			// Get the next chunk
-			__m256 m1 = { 0 }, m2 = { 0 };
-			memcpy( &m1, (front + i), j );
-			memcpy( &m2, (back + i), j );
+				// Apply and store
+				_mm256_storeu_ps( f, _mm256_xor_ps( u, v ) );
 
-			// Apply, and copy out
-			__m256 m3 = _mm256_xor_ps( m1, m2 );
-			memcpy( (front + i), &m3, j );
-			i += j;
+				// Advance
+				i += s;
+			}
 		}
 		return cb;
 	}
