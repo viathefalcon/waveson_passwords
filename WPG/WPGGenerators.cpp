@@ -28,7 +28,7 @@
 // Macros
 //
 
-#if defined (_M_IX86) || defined (_M_X64)
+#if defined (_M_IX86) || defined (_M_X64) || defined (_M_ARM64)
 #define le32_to_host(val) (val)
 #define be32_to_host(val) _byteswap_ulong(val)
 #define le16_to_host(val) (val)

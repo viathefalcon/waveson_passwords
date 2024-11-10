@@ -31,7 +31,8 @@ typedef enum _XORVex {
 	XORVexMMX = 1,
 	XORVexSSE = 2,
 	XORVexSSE2 = 4,
-	XORVexAVX = 8
+	XORVexAVX = 8,
+    XORVexNEON = 16
 
 } XORVex;
 
