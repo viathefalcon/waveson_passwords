@@ -18,6 +18,7 @@
 #include <memory>
 
 // Local Project Headers
+#include "exports.h"
 #include "BitOps.h"
 
 // Types
@@ -67,6 +68,6 @@ typedef wpg_t* wpg_ptr;
 //
 
 // Returns the first set capability of the given collection of capabilities
-WPGCap WPGCapsFirst(WPGCaps);
+WPG_CORE_API WPGCap WPGCapsFirst(WPGCaps);
 
 #endif // !defined(__WPG_GENERATORS_H__)

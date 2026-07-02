@@ -26,21 +26,21 @@ DECLARE_HANDLE(WPG_H);
 //
 
 // Starts the thread
-WPG_H StartWPGGenerator(HWND, BYTE);
+WPG_CORE_API WPG_H StartWPGGenerator(HWND, BYTE);
 
 // Generates a password in the given output buffer; returns an enumeration of the generators which failed
-VOID WPGPwdGenAsync(__in WPG_H, __in BYTE, __in WPGCaps);
+WPG_CORE_API VOID WPGPwdGenAsync(__in WPG_H, __in BYTE, __in WPGCaps);
 
 // Sets the alphabet to be used for subsequently-generated passwords
-VOID SetPwdAlphabetAsync(__in WPG_H, __in LPCTSTR, __in BYTE);
+WPG_CORE_API VOID SetPwdAlphabetAsync(__in WPG_H, __in LPCTSTR, __in BYTE);
 
 // Enables/disables the use of duplicate characters in subsequently-genreated passwords
-VOID EnablePwdDuplicatesAsync(__in WPG_H, __in BOOL);
+WPG_CORE_API VOID EnablePwdDuplicatesAsync(__in WPG_H, __in BOOL);
 
 // Stops the thread
-VOID StopWPGGenerator(WPG_H);
+WPG_CORE_API VOID StopWPGGenerator(WPG_H);
 
 // Cleans up after the thread
-VOID CleanupWPGGenerator(WPG_H);
+WPG_CORE_API VOID CleanupWPGGenerator(WPG_H);
 
 #endif // __WPG_H__

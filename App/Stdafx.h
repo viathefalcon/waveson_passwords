@@ -28,17 +28,5 @@
 // Safe String Headers
 #include <strsafe.h>
 
-// Macros
-//
-
-// Macros to safely release and/or delete interfaces and/or interface pointers.
-#ifndef SAFE_DELETE
-#define SAFE_DELETE(I) { if(I) { delete[] (I); (I)=NULL; } }
-#endif
-#ifndef SAFE_RELEASE
-#define SAFE_RELEASE(I) { if(I) { (I)->Release(); (I)=NULL; } }
-#endif
-
-// Macros to allocate and release memory from the process heap
-#define PH_ALLOC(Bytes) ::HeapAlloc( ::GetProcessHeap( ), HEAP_ZERO_MEMORY, (Bytes) )
-#define PH_FREE(Buffer) ::HeapFree( ::GetProcessHeap( ), 0, (Buffer) )
+// Nearby Project Headers
+#include <heaps.h>

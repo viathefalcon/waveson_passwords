@@ -8,7 +8,7 @@
 //
 
 // Precompiled Headers
-#include "Stdafx.h"
+#include "pch.h"
 
 // C++ Standard Library Headers
 #include <string>
@@ -21,6 +21,9 @@
 
 // RDRAND Headers
 #include "ia_rdrand.h"
+
+// Local Project Headers
+#include "heaps.h"
 
 // Declarations
 #include "WPGGenerators.h"

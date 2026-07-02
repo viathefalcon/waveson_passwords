@@ -8,7 +8,10 @@
 //
 
 // Precompiled Headers
-#include "Stdafx.h"
+#include "pch.h"
+
+// Local Project Headers
+#include "heaps.h"
 
 // Declarations
 #include "WPGGenerator.h"
