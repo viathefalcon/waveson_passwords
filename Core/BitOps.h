@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <utility>
 
 // C Standard Library Headers
 #include <limits.h>
@@ -206,28 +207,16 @@ public:
     }
 
     void set(size_t bit) override {
-        apply(
-            [this](size_t word, const word_type& mask) -> void {
-                m_words[word] |= mask;
-            },
-            bit
-        );
+        auto got = this->at( bit );
+        m_words[got.first] |= got.second;
     }
 
     bool is_set(size_t bit) const override {
-
-        bool result = false;
-        apply(
-            [this, &result](size_t word, const word_type& mask) -> void {
-                result = ((m_words[word] & mask) != 0);
-            },
-            bit
-        );
-        return result;
+        const auto got = this->at( bit );
+        return ((m_words[got.first] & got.second) != 0);
     }
 
-    void reset() override {
-        
+    void reset() override {        
         for (auto it = m_words.begin( ), end = m_words.end( ); it != end; ++it){
             (*it) = zero_word;
         }
@@ -242,20 +231,21 @@ private:
             : (wc + 1);
     }
 
-    template<typename lambda_type>
-    void apply(lambda_type lambda, size_t index) const {
+    typedef unsigned int word_type;
+    typedef ::std::vector<word_type> word_string;
+
+    std::pair<size_t, word_type> at(size_t index) const {
 
         // Find the word
         const auto word = (index / bits_per_word);
 
         // Generate the mask
         const auto bit = (index % bits_per_word);
-        const word_type mask = (1 << bit);
-        lambda( word, mask );
-    }
+        const word_type mask = (word_type{1} << bit);
 
-    typedef unsigned int word_type;
-    typedef ::std::vector<word_type> word_string;
+        // Return
+        return std::make_pair( word, mask );
+    }
 
     static const word_type zero_word = 0;
     static const size_t bits_per_word = (CHAR_BIT * sizeof( word_type ));

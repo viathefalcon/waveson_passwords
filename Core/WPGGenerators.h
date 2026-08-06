@@ -41,7 +41,7 @@ typedef DWORD WPGCaps;
 
 class WPG_CORE_API rng_t {
 public:
-	typedef unsigned char size_type;
+	typedef uint32_t size_type;
 
 	rng_t(void) = default;
 	virtual ~rng_t(void) = default;

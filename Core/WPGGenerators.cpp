@@ -58,7 +58,7 @@ enum {
 // Forward Declarations
 //
 
-SIZE_T RdRandFill(PVOID, const SIZE_T);
+static SIZE_T RdRandFill(PVOID, const SIZE_T);
 
 // Classes
 //
@@ -268,6 +268,14 @@ WPGCaps wpg_t::Generate(LPTSTR pszBuffer,
 						PBYTE cchLength,
 						LPCTSTR pszAlphabet,
 						BOOL fDuplicatesAllowed) {
+	// Look for an early out
+	if (caps == WPGCapNONE){
+		if (cchLength){
+			*cchLength = 0;
+		}
+		return WPGCapNONE;
+	}
+
 	// Setup
 	size_t cchAlphabet = 0;
 	StringCchLength( pszAlphabet, STRSAFE_MAX_CCH, &cchAlphabet );
@@ -276,16 +284,20 @@ WPGCaps wpg_t::Generate(LPTSTR pszBuffer,
 		: std::make_unique<bitset_t>( cchAlphabet );
 	selector_t<uintmax_t> selector( 0, cchAlphabet );
 
-	// Allocate a pair of buffers - rounding up to the next nearest number
-	// of whole words
-	const auto cbBuffer = round_up_byte_count<uintmax_t>( cchBuffer );
+	// Prep some buffers
+	constexpr SIZE_T cbBuffer = 256;
+	BYTE front[cbBuffer] = { 0 };
+	BYTE back[cbBuffer] = { 0 };
+
+	// Get the number of bytes we want to randomly generate per pass,
+	// either a whole number of words that can cover the requested output
+	// size or the static maximum we define in this function
+	const auto cbRandom = min(cbBuffer, round_up_byte_count<uintmax_t>( cchBuffer ));
 #if defined (_DEBUG)
 	TCHAR szBuf[128];
-	::StringCchPrintf(szBuf, 128, TEXT("Allocating %d bytes for %u characters.\x0A"), cbBuffer, cchBuffer);
+	::StringCchPrintf(szBuf, 128, TEXT("Using buffers of %llu bytes for %llu characters.\x0A"), cbRandom, cchBuffer);
 	OutputDebugString( szBuf );
 #endif
-	LPBYTE lpFront = static_cast<LPBYTE>( PH_ALLOC( cbBuffer ) );
-	LPBYTE lpBack = static_cast<LPBYTE>( PH_ALLOC( cbBuffer ) );
 
 	// Loop until we've emitted the requested number of characters
 	// (or determine we can't)
@@ -305,11 +317,11 @@ WPGCaps wpg_t::Generate(LPTSTR pszBuffer,
 				return;
 			}
 
-			const auto filled = rng->fill( lpBack, static_cast<size_type>( cbBuffer ) );
+			const auto filled = rng->fill( back, static_cast<size_type>( cbRandom ) );
 			if (filled){
 				// Xor with previously-generated values (if any)
 				generated = min( generated, static_cast<decltype(generated)>( filled ) );
-				m_xor->apply( lpFront, lpBack, generated );
+				m_xor->apply( front, back, generated );
 			}else{
 				wpgCapsFailed |= cap;
 			}
@@ -332,7 +344,7 @@ WPGCaps wpg_t::Generate(LPTSTR pszBuffer,
 				// Put the first next-value into the least-significant byte of word,
 				// the next-next-value into the next byte, etc. (host-endian agnostic).
 				for (size_t i = 0, j = 0; i < copyable; ++i, j += CHAR_BIT) {
-					const auto next = *(lpFront + offset++);
+					const auto next = *(front + offset++);
 					word |= (static_cast<decltype(word)>(next) << j);
 #if defined (_DEBUG)
 					OutputDebugStringA("Got: " );
@@ -388,16 +400,14 @@ WPGCaps wpg_t::Generate(LPTSTR pszBuffer,
 			}
 		}
 
-		SecureZeroMemory( lpFront, cbBuffer );
-		SecureZeroMemory( lpBack, cbBuffer );
+		SecureZeroMemory( front, cbBuffer );
+		SecureZeroMemory( back, cbBuffer );
 	}
 	if (cchLength){
 		*cchLength = cchFilled;
 	}
 
 	// Cleanup, return
-	PH_FREE( lpFront );
-	PH_FREE( lpBack );
 	return wpgCapsFailed;
 }
 
