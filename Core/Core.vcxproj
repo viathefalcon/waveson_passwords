@@ -253,6 +253,7 @@
     <ClInclude Include="framework.h" />
     <ClInclude Include="heaps.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="resource.h" />
     <ClInclude Include="WPGGenerator.h" />
     <ClInclude Include="WPGGenerators.h" />
   </ItemGroup>
@@ -269,6 +270,9 @@
     </ClCompile>
     <ClCompile Include="WPGGenerator.cpp" />
     <ClCompile Include="WPGGenerators.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="Core.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
