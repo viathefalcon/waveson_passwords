@@ -9,7 +9,7 @@
 //
 
 // Precompiled Headers
-#include "Stdafx.h"
+#include "pch.h"
 
 // C++ Standard Library Headers
 #include <set>
@@ -25,6 +25,7 @@
 #endif  //!defined(_M_ARM64)
 
 // Local Project Headers
+#include "heaps.h"
 #include "BitOps.h"
 
 // Classes
