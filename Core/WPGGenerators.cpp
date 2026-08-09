@@ -301,13 +301,15 @@ WPGCaps wpg_t::Generate(LPTSTR pszBuffer,
 
 	// Loop until we've emitted the requested number of characters
 	// (or determine we can't)
+	auto wpgCapsApplied = caps;
 	decltype(cchBuffer) cchFilled = 0;
 	WPGCaps wpgCapsFailed = WPGCapNONE;
-	while ((cchFilled < cchBuffer) && (wpgCapsFailed == WPGCapNONE)){
+	while ((cchFilled < cchBuffer) && (wpgCapsApplied == caps)){
 		using rng_type = decltype(m_rngs)::value_type;
 		using size_type = rng_type::element_type::size_type;
 
-		// Generate some new random values
+		// Generate, combine some new random values
+		wpgCapsApplied = WPGCapNONE;
 		const auto cchUnfilled = static_cast<size_type>(cchBuffer - cchFilled);
 		auto generated = round_up_byte_count<uintmax_t>( cchUnfilled );
 		::std::for_each( m_rngs.cbegin( ), m_rngs.cend( ), [&](const rng_type& rng) {
@@ -322,11 +324,13 @@ WPGCaps wpg_t::Generate(LPTSTR pszBuffer,
 				// Xor with previously-generated values (if any)
 				generated = min( generated, static_cast<decltype(generated)>( filled ) );
 				m_xor->apply( front, back, generated );
+
+				wpgCapsApplied |= cap;
 			}else{
 				wpgCapsFailed |= cap;
 			}
 		} );
-		if (wpgCapsFailed == WPGCapNONE){
+		if (wpgCapsApplied == caps){
 #if defined (_DEBUG)
 			{
 				TCHAR szBuf[128];

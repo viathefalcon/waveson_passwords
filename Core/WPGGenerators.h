@@ -30,7 +30,7 @@ typedef enum _WPGCap {
 	WPGCapRDRAND = 1,
 	WPGCapTPM12 = 2,
 	WPGCapTPM20 = 4,
-	WPGCapTest = 0xFF
+	WPGCapTest = 0x80
 
 } WPGCap;
 

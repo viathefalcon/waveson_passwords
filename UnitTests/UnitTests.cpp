@@ -44,7 +44,7 @@ namespace
 			const auto available = m_bytes.size( ) - m_read;
 			const auto n = static_cast<size_type>(min(static_cast<decltype(m_bytes)::size_type>( size ), available));
 			if (n > 0){
-				CopyMemory( dst, m_bytes.data( ), n );
+				CopyMemory( dst, m_bytes.data( ) + m_read, n );
 			}
 
 			m_read += static_cast<decltype(m_read)>( n );
@@ -160,6 +160,56 @@ namespace UnitTests
 			Logger::WriteMessage( "\n" );
 		}
 
+		TEST_METHOD(TestWpgGenerateRNGFailure)
+		{
+			// Arrange
+			::test_rng_t::container_type values = { };
+			auto rng = ::std::make_unique<test_rng_t>( std::move( values ) );
+			const size_t cchBuffer = 128;
+			TCHAR szBuffer[cchBuffer] = { 0 };
+			BYTE cchGenerated = 0;
+			const auto cap = WPGCapTest;
+
+			// Act
+			test_wpg_t fixture( ::std::move( rng ) );
+			const auto failed = fixture.Generate(
+				szBuffer, 
+				static_cast<BYTE>( cchBuffer ), 
+				cap, 
+				&cchGenerated,
+				pszAlphabet,
+				false );
+
+			// Assert
+			Assert::AreEqual( static_cast<WPGCaps>( cap ), failed );
+			Assert::AreEqual( 0, static_cast<int>( cchGenerated ) );
+		}
+
+		TEST_METHOD(TestWpgGenerateCapsNONE)
+		{
+			// Arrange
+			const ::test_rng_t::container_type indices = { 0, 1, 2, 3, 4 };
+			auto rng = ::std::make_unique<test_rng_t>(
+				make_rng_values( indices, min_bit_count( cchAlphabet ) )
+			);
+			const size_t cchBuffer = 128;
+			TCHAR szBuffer[cchBuffer] = { 0 };
+			BYTE cchGenerated = 0;
+
+			// Act
+			test_wpg_t fixture( ::std::move( rng ) );
+			const auto failed = fixture.Generate(
+				szBuffer, 
+				static_cast<BYTE>( indices.size( ) ), 
+				WPGCapNONE, 
+				&cchGenerated,
+				pszAlphabet,
+				false );
+
+			// Assert
+			Assert::AreEqual( 0, static_cast<int>( cchGenerated ) );
+		}
+
 	private:
 		LPCTSTR pszAlphabet = TEXT("abcdefghijklmnopqrstuvwxyz1234567890!@#$%&*ABCDEFGHIJKLMNOPQRSTUVWXYZ");
 		size_t cchAlphabet;
@@ -223,7 +273,7 @@ namespace UnitTests
 					}
 				}
 
-				// If a word was partially under cosntruction when the preceding
+				// If a word was partially under construction when the preceding
 				// loop terminated, then accumulate it
 				if (counter)
 				{
