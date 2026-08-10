@@ -1,2 +1,4 @@
 *.exe
 *.msix
+*.msixbundle
+*.dll
