@@ -5,20 +5,14 @@ Waveson Password Generator is a Windows app which combines hardware-based source
 
 If you're just looking for the app, built binaries can be downloaded from [here](https://viathefalcon.net/waveson/wpg/), or it can be built and installed as follows:
 
-## Build
+## Local build, package, unsigned installation
 
-```
-msbuild waveson_passwords.sln /p:Configuration=Release /p:Platform=ARM64
-```
-
-## Local, Unsigned Installation
-Windows 11 only: build, as above, and then:
 ```pwsh
 cd .\Appx\
-.\ARM64.bat
+.\Package.ps1
 ```
 
-..to generate the MSIX package. Then, as an Administrator:
+..to generate the MSIX bundle. Then, as an Administrator:
 ```pwsh
-Add-AppxPackage -Path .\WPG.ARM64.msix -AllowUnsigned
+Add-AppxPackage -Path .\WPG.msixbundle -AllowUnsigned
 ```
