@@ -132,12 +132,13 @@ VOID WPGPwdGenAsync(__in WPG_H wpgHandle, __in BYTE cchLength, __in WPGCaps wpgC
 
 VOID SetPwdAlphabetAsync(__in WPG_H wpgHandle, __in LPCTSTR pszAlphabet, __in BYTE cchAlphabet) {
 
-	// Take a (null-terminated) copy of the string
+	// Take a (null-terminated) copy of the alphabet
 	LPTSTR pszCopy = (cchAlphabet > 0)
 		? static_cast<LPTSTR>( PH_ALLOC( sizeof( TCHAR ) * (cchAlphabet + 1) ) )
 		: NULL;
 	if (pszCopy){
 		CopyMemory( pszCopy, pszAlphabet, sizeof( TCHAR ) * cchAlphabet );
+		pszCopy[cchAlphabet] = 0;
 	}
 
 	// Post it to the thread
@@ -188,7 +189,10 @@ VOID CleanupWPGGenerator(WPG_H wpgHandle) {
 		_aligned_free( pInstance->plStop );
 		pInstance->plStop = NULL;
 	}
-	CloseHandle( pInstance->hThread );
+	if (pInstance->hThread){
+		CloseHandle( pInstance->hThread );
+		pInstance->hThread = NULL;
+	}
 	PH_FREE( pInstance );
 }
 
@@ -371,7 +375,10 @@ HRESULT OnGeneratePassword(HWND hWnd, WPARAM wParam, LPARAM lParam) {
 
 #if defined (_DEBUG)
 		if (wpgCapsFailed == WPGCapNONE){
-			OutputDebugString( TEXT( "Generator thread generated password: " ) );
+			constexpr size_t cchBuffer = 128;
+			TCHAR szBuffer[128] = { 0 };
+			StringCchPrintf(szBuffer, cchBuffer, TEXT( "Generator thread generated password (%llu): " ), static_cast<size_t>( cch ) );
+			OutputDebugString( szBuffer );
 			OutputDebugString( pThreadProps->pszBuffer );
 			OutputDebugString( TEXT( "\x0A" ) );
 		}else{
@@ -408,7 +415,11 @@ HRESULT OnSetPwdAlphabet(HWND hWnd, WPARAM wParam, LPARAM lParam) {
 		pThreadProps->cchAlphabet = static_cast<BYTE>( lParam );
 #if defined (_DEBUG)
 		OutputDebugString( TEXT( "Password alphabet set to: " ) );
-		OutputDebugString( pThreadProps->pszAlphabet );
+		if (pThreadProps->pszAlphabet){
+			OutputDebugString( pThreadProps->pszAlphabet );
+		}else{
+			OutputDebugString( TEXT( "(nothing - null - nada)" ) );
+		}
 		OutputDebugString( TEXT( "\x0A" ) );
 #endif
 		return S_OK;

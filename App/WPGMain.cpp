@@ -21,6 +21,13 @@
 #define UWM_REFRESH				(AWM_WPG_STOPPED+1L)
 #define UWM_COPY				(UWM_REFRESH+1L)
 
+#ifndef STATUS_INVALID_HANDLE
+#define STATUS_INVALID_HANDLE	((DWORD)0xC0000008L)
+#endif
+
+// Brings the process down if the given (security-critical) call did not succeed
+#define EXIT_IF_FAILS(f)		do { if (!(f)){ ExitWithFatalError( GetLastError( ) ); } } while (0)
+
 // Constants
 //
 
@@ -105,6 +112,12 @@ INT WPGScaleX(INT);
 // Automatically ticks the "Allow duplicates.." checkbox if the desired password length is greater than the input alphabet
 VOID AutoCheckDuplicatesAndRefresh(HWND);
 
+// Handles the exceptions raised by the strict handle check mitigation policy
+LONG CALLBACK OnInvalidHandleException(PEXCEPTION_POINTERS);
+
+// Displays an error message and terminates the process with the given exit code
+VOID ExitWithFatalError(DWORD);
+
 // Functions
 //
 
@@ -113,6 +126,26 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
 
 	UNREFERENCED_PARAMETER( hPrevInstance );
 	UNREFERENCED_PARAMETER( nCmdShow );
+
+	PROCESS_MITIGATION_DYNAMIC_CODE_POLICY policy = { 0 };
+	policy.ProhibitDynamicCode = 1;
+	EXIT_IF_FAILS( SetProcessMitigationPolicy(
+		ProcessDynamicCodePolicy,
+		&policy,
+		sizeof( policy ) ) );
+
+	// Only opt into strict handle checks if we can first install the handler which
+	// gives us the chance to terminate gracefully; the policy cannot be disabled again
+	PVOID pVectoredHandler = AddVectoredExceptionHandler( 1UL, OnInvalidHandleException );
+	if (pVectoredHandler){
+		PROCESS_MITIGATION_STRICT_HANDLE_CHECK_POLICY handles = { 0 };
+		handles.RaiseExceptionOnInvalidHandleReference = 1;
+		handles.HandleExceptionsPermanentlyEnabled = 1;
+		EXIT_IF_FAILS( SetProcessMitigationPolicy(
+			ProcessStrictHandleCheckPolicy,
+			&handles,
+			sizeof( handles ) ) );
+	}
 
 	// Initialise the Common Controls Library; ensure that the progress control is available
 	INITCOMMONCONTROLSEX icex = { 0L };
@@ -530,8 +563,6 @@ HRESULT OnRefresh(HWND hDlg) {
 	// Allocate a buffer for the output
 	HWND hSlider = GetDlgItem( hDlg, IDC_SLIDER_OUTPUT );
 	BYTE cchPwd = static_cast<BYTE>( SendMessage( hSlider, TBM_GETPOS, 0, 0 ) );
-	HANDLE hProcessHeap = GetProcessHeap( );
-	LPTSTR pszPwd = static_cast<LPTSTR>( HeapAlloc( hProcessHeap, HEAP_ZERO_MEMORY, sizeof( TCHAR ) * (cchPwd+1) ) );
 
 	// Send to the generator thread
 	WPG_H wpgHandle = (uiStatePtr) ? uiStatePtr->wpgHandle : NULL;
@@ -807,4 +838,26 @@ VOID AutoCheckDuplicatesAndRefresh(HWND hDlg) {
 
 	// Refresh the generated password with the new configuration
 	PostMessage( hDlg, UWM_REFRESH, 0, 0 );
+}
+
+LONG CALLBACK OnInvalidHandleException(PEXCEPTION_POINTERS pExceptionInfo) {
+
+	if (pExceptionInfo->ExceptionRecord->ExceptionCode == STATUS_INVALID_HANDLE){
+		// The handle table is in an unknown state, so bring the process down deterministically
+		// rather than letting the mitigation fail-fast without a word to the user
+		ExitWithFatalError( STATUS_INVALID_HANDLE );
+	}
+
+	return EXCEPTION_CONTINUE_SEARCH;
+}
+
+VOID ExitWithFatalError(DWORD dwExitCode) {
+
+	MessageBox(
+		HWND_DESKTOP,
+		TEXT( "An internal error occurred. The application will now close." ),
+		TEXT( "Error" ),
+		MB_OK | MB_ICONERROR
+	);
+	TerminateProcess( GetCurrentProcess( ), dwExitCode );
 }
