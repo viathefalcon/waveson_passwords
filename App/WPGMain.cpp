@@ -118,6 +118,9 @@ LONG CALLBACK OnInvalidHandleException(PEXCEPTION_POINTERS);
 // Displays an error message and terminates the process with the given exit code
 VOID ExitWithFatalError(DWORD);
 
+// Excludes the given window from being captured by screen/window capture APIs, where supported
+VOID ExcludeWindowFromCapture(HWND);
+
 // Functions
 //
 
@@ -418,6 +421,9 @@ HRESULT OnInitDialog(HWND hDlg) {
 
 	// Kick off the generator thread
 	WPG_H wpgHandle = StartWPGGenerator( hDlg, c_cchMaxLength );
+
+	// Prevent the window's contents from appearing in screen captures, on OSes that support it
+	ExcludeWindowFromCapture( hDlg );
 
 	// Set the icon, c.f. https://support.microsoft.com/en-us/help/179582/how-to-set-the-title-bar-icon-in-a-dialog-box
 	if (g_hIcon){
@@ -860,4 +866,27 @@ VOID ExitWithFatalError(DWORD dwExitCode) {
 		MB_OK | MB_ICONERROR
 	);
 	TerminateProcess( GetCurrentProcess( ), dwExitCode );
+}
+
+VOID ExcludeWindowFromCapture(HWND hWnd) {
+
+	// Windows 10 version 2004 corresponds to build 19041; the manifest declares
+	// support for Windows 10, so this reports the true OS version, unclamped
+	OSVERSIONINFOEXW versionInfo = { 0 };
+	versionInfo.dwOSVersionInfoSize = sizeof( versionInfo );
+	versionInfo.dwMajorVersion = 10;
+	versionInfo.dwBuildNumber = 19041;
+
+	DWORDLONG dwlConditionMask = 0;
+	VER_SET_CONDITION( dwlConditionMask, VER_MAJORVERSION, VER_GREATER_EQUAL );
+	VER_SET_CONDITION( dwlConditionMask, VER_BUILDNUMBER, VER_GREATER_EQUAL );
+
+	const auto isWindows10Version2004OrGreater = VerifyVersionInfoW(
+		&versionInfo,
+		VER_MAJORVERSION | VER_BUILDNUMBER,
+		dwlConditionMask
+	);
+	if (isWindows10Version2004OrGreater){
+		SetWindowDisplayAffinity( hWnd, WDA_EXCLUDEFROMCAPTURE );
+	}
 }
