@@ -51,7 +51,7 @@ const BYTE c_cchDefaultLength = 0x10;
 
 const DWORD c_dwRDRANDCheck = 0x80000000;
 const DWORD c_dwTPMCheck = 0x00800000;
-const DWORD c_dwAutoCopyCheck = 0x00008000;
+const DWORD c_dwUnusedCheck = 0x00008000;
 const DWORD c_dwDuplicatesCheck = 0x00000800;
 const DWORD c_dwDefaultChecks = (c_dwRDRANDCheck | c_dwTPMCheck | c_dwDuplicatesCheck);
 
@@ -367,10 +367,6 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 
 		case UWM_COPY:
 			bResult = SUCCEEDED( OnCopy( hDlg ) );
-			if (!bResult){
-				// Automatically disable the auto-copy, if only to stop the same error dialog appearing repeatedly
-				CheckDlgButton( hDlg, IDC_CHECK_AUTO_COPY, BST_UNCHECKED );
-			}
 			break;
 
 		default:
@@ -389,8 +385,8 @@ HRESULT OnCreateTooltips(HWND hDlg) {
 	GetWindowRect( hDlg, &r );
 	const LPARAM lWidth = static_cast<LPARAM>( WPGScaleX( r.right - r.left ) );
 
-	const int nDlgItems[] = { IDC_CHECK_RDRAND, IDC_CHECK_TPM, IDC_EDIT_INPUT, IDC_SLIDER_OUTPUT, IDC_CHECK_AUTO_COPY, IDC_CHECK_ALLOW_DUPLICATES };
-	const UINT uStringIDs[] = { IDS_CHECK_RDRAND, IDS_CHECK_TPM, IDS_EDIT_INPUT, IDS_SLIDER_OUTPUT, IDS_CHECK_AUTO_COPY, IDS_CHECK_ALLOW_DUPLICATES };
+	const int nDlgItems[] = { IDC_CHECK_RDRAND, IDC_CHECK_TPM, IDC_EDIT_INPUT, IDC_SLIDER_OUTPUT, IDC_CHECK_ALLOW_DUPLICATES };
+	const UINT uStringIDs[] = { IDS_CHECK_RDRAND, IDS_CHECK_TPM, IDS_EDIT_INPUT, IDS_SLIDER_OUTPUT, IDS_CHECK_ALLOW_DUPLICATES };
 	const unsigned count = min( ARRAYSIZE( nDlgItems ), ARRAYSIZE( uStringIDs ) );
 
 	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
@@ -597,9 +593,6 @@ HRESULT OnPwdGenerated(HWND hDlg, WPARAM wParam, LPARAM lParam) {
 
 		// Set the output
 		SetWindowText( GetDlgItem( hDlg, IDC_EDIT_OUTPUT ), pszPwd );
-		if (IsDlgButtonChecked( hDlg, IDC_CHECK_AUTO_COPY )){
-			PostMessage( hDlg, UWM_COPY, 0U, 0U );
-		}
 	}else{
 		SetErrorMsg( hDlg, wpgCapsFailed );
 	}
@@ -705,11 +698,6 @@ HRESULT OnGeneratorStarted(HWND hDlg, WPARAM wParam, LPARAM lParam) {
 	}
 	CheckDlgButton(
 		hDlg,
-		IDC_CHECK_AUTO_COPY,
-		(dwChecks & c_dwAutoCopyCheck) ? BST_CHECKED : BST_UNCHECKED
-	);
-	CheckDlgButton(
-		hDlg,
 		IDC_CHECK_ALLOW_DUPLICATES,
 		(dwChecks & c_dwDuplicatesCheck) ? BST_CHECKED : BST_UNCHECKED
 	);
@@ -737,7 +725,6 @@ HRESULT OnGeneratorStopped(HWND hDlg) {
 		DWORD dwChecks = 1;
 		dwChecks |= (IsDlgButtonChecked( hDlg, IDC_CHECK_RDRAND ) ? c_dwRDRANDCheck : 0);
 		dwChecks |= (IsDlgButtonChecked( hDlg, IDC_CHECK_TPM ) ? c_dwTPMCheck : 0);
-		dwChecks |= (IsDlgButtonChecked( hDlg, IDC_CHECK_AUTO_COPY ) ? c_dwAutoCopyCheck : 0);
 		dwChecks |= (IsDlgButtonChecked( hDlg, IDC_CHECK_ALLOW_DUPLICATES ) ? c_dwDuplicatesCheck : 0);
 		WPGRegSetDWORD( hKey, WPGRegChecks, dwChecks );
 
