@@ -14,6 +14,9 @@
 #include "WPGAboutEtc.h"
 #include "WPGRegistry.h"
 
+// Nearby Project Headers
+#include <WPGOutputCtl.h>
+
 // Macros
 //
 
@@ -156,6 +159,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
 	icex.dwSize = static_cast<DWORD>( sizeof( INITCOMMONCONTROLSEX ) );
 	if (!InitCommonControlsEx( &icex )){
 		MessageBox( HWND_DESKTOP, TEXT( "Failed to initialise common controls. Aborting." ), TEXT( "Error" ), MB_OK | MB_ICONERROR );
+		return 1;
+	}
+
+	// Register the class of the control which renders generated passwords
+	if (!InitWPGOutputControl( hInstance )){
+		MessageBox( HWND_DESKTOP, TEXT( "Failed to initialise the output control. Aborting." ), TEXT( "Error" ), MB_OK | MB_ICONERROR );
 		return 1;
 	}
 

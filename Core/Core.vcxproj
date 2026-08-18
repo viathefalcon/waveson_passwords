@@ -261,6 +261,7 @@
     <ClInclude Include="resource.h" />
     <ClInclude Include="WPGGenerator.h" />
     <ClInclude Include="WPGGenerators.h" />
+    <ClInclude Include="WPGOutputCtl.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BitOps.cpp" />
@@ -275,6 +276,7 @@
     </ClCompile>
     <ClCompile Include="WPGGenerator.cpp" />
     <ClCompile Include="WPGGenerators.cpp" />
+    <ClCompile Include="WPGOutputCtl.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="Core.rc" />
