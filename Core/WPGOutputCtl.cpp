@@ -1,4 +1,4 @@
-// WPGOutputCtl.cpp: implements the "WPGOutput" window class
+// WPGOutputCtl.cpp: implements the window class for the output control
 //
 // Waveson Password Generator
 // Author: Stephen Higgins, https://github.com/viathefalcon
@@ -10,6 +10,9 @@
 // Precompiled Headers
 #include "pch.h"
 
+// Windows Headers
+#include <windowsx.h>
+
 // Local Project Headers
 #include "heaps.h"
 #include "WPGOutputCtl.h"
@@ -19,6 +22,9 @@
 
 #define WPG_OUTPUT_PADDING	2
 
+// The fixed font size, in points; scaled for the device DPI at render time
+#define WPG_OUTPUT_FONT_POINTS	16
+
 // Types
 //
 
@@ -26,9 +32,13 @@
 typedef struct _WPGOutputState {
 
 	LPTSTR pszText;		// The internal text buffer
-	int cchText;		// The length, in characters, of the text in the buffer (excluding the terminator)
-	int cchBuffer;		// The capacity, in characters, of the buffer (including the terminator)
+	size_t cchText;		// The length, in characters, of the text in the buffer (excluding the terminator)
+	size_t cchBuffer;	// The capacity, in characters, of the buffer (including the terminator)
 	HFONT hFont;		// The (cached) font with which the text is currently rendered
+	int nScrollPos;		// The current horizontal scroll offset, in pixels
+	BOOL bDragging;		// Whether the text is currently being drag-scrolled with the mouse
+	int nDragAnchorX;	// The client x-coordinate at which the drag began, in pixels
+	int nDragAnchorPos;	// The scroll offset at which the drag began, in pixels
 
 } WPGOutputState, *PWPGOutputState;
 
@@ -49,11 +59,11 @@ static VOID DiscardOutputFont(PWPGOutputState pState) {
 	}
 }
 
-// Creates a monospace font of the given (cell) height
-static HFONT CreateOutputFont(int nHeight) {
+// Creates the monospace font at the fixed size, scaled for the DPI of the given device
+static HFONT CreateOutputFont(HDC hdc) {
 
 	LOGFONT lf = { 0 };
-	lf.lfHeight = -nHeight;
+	lf.lfHeight = -MulDiv( WPG_OUTPUT_FONT_POINTS, GetDeviceCaps( hdc, LOGPIXELSY ), 72 );
 	lf.lfWeight = FW_NORMAL;
 	lf.lfCharSet = DEFAULT_CHARSET;
 	lf.lfOutPrecision = OUT_TT_PRECIS;
@@ -64,35 +74,73 @@ static HFONT CreateOutputFont(int nHeight) {
 	return CreateFontIndirect( &lf );
 }
 
-// Creates the largest monospace font in which the given text fits within the given bounds
-static HFONT FitOutputFont(HDC hdc, LPCTSTR pszText, int cchText, int cx, int cy) {
+// Ensures the cached font exists and returns the pixel width of the current text
+static int MeasureOutputText(HWND hWnd, PWPGOutputState pState) {
 
-	const int nMax = max( 1, cy );
-	int lo = 1, hi = nMax, nBest = 1;
-	while (lo <= hi){
-		const int nMid = lo + ((hi - lo) / 2);
-		const HFONT hFont = CreateOutputFont( nMid );
-		if (!hFont){
-			break;
+	int cx = 0;
+	const HDC hdc = GetDC( hWnd );
+	if (hdc){
+		if (!pState->hFont){
+			pState->hFont = CreateOutputFont( hdc );
 		}
-
-		SIZE size = { 0 };
-		const HGDIOBJ hPrev = SelectObject( hdc, hFont );
-		const BOOL bExtent = GetTextExtentPoint32( hdc, pszText, cchText, &size );
-		SelectObject( hdc, hPrev );
-		DeleteObject( hFont );
-		if (!bExtent){
-			break;
+		if (pState->hFont && (pState->cchText > 0)){
+			SIZE size = { 0 };
+			const HGDIOBJ hPrev = SelectObject( hdc, pState->hFont );
+			if (GetTextExtentPoint32( hdc, pState->pszText, pState->cchText, &size )){
+				cx = size.cx;
+			}
+			SelectObject( hdc, hPrev );
 		}
-
-		if ((size.cx <= cx) && (size.cy <= cy)){
-			nBest = nMid;
-			lo = nMid + 1;
-		}else{
-			hi = nMid - 1;
-		}
+		ReleaseDC( hWnd, hdc );
 	}
-	return CreateOutputFont( nBest );
+	return cx;
+}
+
+// Updates the horizontal scroll bar to reflect the current text; the bar stays visible but disabled while the text fits
+static VOID UpdateOutputScroll(HWND hWnd, PWPGOutputState pState) {
+
+	RECT rc = { 0 };
+	GetClientRect( hWnd, &rc );
+	const int avail = max( 1, (rc.right - rc.left) - (2 * WPG_OUTPUT_PADDING) );
+	const int cxText = MeasureOutputText( hWnd, pState );
+
+	const int nOverflow = (cxText > avail) ? (cxText - avail) : 0;
+	pState->nScrollPos = max( 0, min( pState->nScrollPos, nOverflow ) );
+
+	SCROLLINFO si = { 0 };
+	si.cbSize = sizeof( si );
+	// SIF_DISABLENOSCROLL keeps the (non-client) scroll bar shown, just disabled, when the text fits
+	si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS | SIF_DISABLENOSCROLL;
+	si.nMin = 0;
+	si.nMax = nOverflow ? (cxText - 1) : 0;
+	si.nPage = nOverflow ? avail : 0;
+	si.nPos = pState->nScrollPos;
+	SetScrollInfo( hWnd, SB_HORZ, &si, TRUE );
+}
+
+// Returns the largest valid horizontal scroll offset, in pixels, for the current text
+static int GetMaxOutputScroll(HWND hWnd, PWPGOutputState pState) {
+
+	RECT rc = { 0 };
+	GetClientRect( hWnd, &rc );
+	const int avail = max( 1, (rc.right - rc.left) - (2 * WPG_OUTPUT_PADDING) );
+	const int cxText = MeasureOutputText( hWnd, pState );
+	return (cxText > avail) ? (cxText - avail) : 0;
+}
+
+// Applies a new horizontal scroll offset, clamping it and refreshing the bar and paint as needed
+static VOID ScrollOutputTo(HWND hWnd, PWPGOutputState pState, int nPos) {
+
+	nPos = max( 0, min( nPos, GetMaxOutputScroll( hWnd, pState ) ) );
+	if (nPos != pState->nScrollPos){
+		pState->nScrollPos = nPos;
+		SCROLLINFO si = { 0 };
+		si.cbSize = sizeof( si );
+		si.fMask = SIF_POS;
+		si.nPos = nPos;
+		SetScrollInfo( hWnd, SB_HORZ, &si, TRUE );
+		InvalidateRect( hWnd, NULL, FALSE );
+	}
 }
 
 // Copies the given text into the window's internal buffer
@@ -126,44 +174,71 @@ static BOOL SetOutputText(PWPGOutputState pState, LPCTSTR pszText) {
 	return TRUE;
 }
 
-// Paints the window
+// Paints the window, drawing through an off-screen buffer so scrolling doesn't flicker
 static VOID PaintOutput(HWND hWnd, PWPGOutputState pState) {
 
 	PAINTSTRUCT ps = { 0 };
 	const HDC hdc = BeginPaint( hWnd, &ps );
-	if (hdc){
-		RECT rc = { 0 };
-		GetClientRect( hWnd, &rc );
-
-		// Take the background (and text) colours from the parent, so the control blends into it
-		HBRUSH hbr = reinterpret_cast<HBRUSH>( SendMessage(
-			GetParent( hWnd ),
-			WM_CTLCOLORSTATIC,
-			reinterpret_cast<WPARAM>( hdc ),
-			reinterpret_cast<LPARAM>( hWnd ) ) );
-		if (!hbr){
-			// Fallback to the system button-face colour to avoid potential crashes if the parent doesn't handle WM_CTLCOLORSTATIC
-			hbr = GetSysColorBrush( COLOR_BTNFACE );
-		}
-		FillRect( hdc, &ps.rcPaint, hbr );
-
-		if (pState->cchText > 0){
-			const int cx = max( 1, (rc.right - rc.left) - (2 * WPG_OUTPUT_PADDING) );
-			const int cy = max( 1, (rc.bottom - rc.top) - (2 * WPG_OUTPUT_PADDING) );
-			if (!pState->hFont){
-				pState->hFont = FitOutputFont( hdc, pState->pszText, pState->cchText, cx, cy );
-			}
-
-			if (pState->hFont){
-				const HGDIOBJ hPrev = SelectObject( hdc, pState->hFont );
-				const int nBkMode = SetBkMode( hdc, TRANSPARENT );
-				DrawText( hdc, pState->pszText, pState->cchText, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX );
-				SetBkMode( hdc, nBkMode );
-				SelectObject( hdc, hPrev );
-			}
-		}
-		EndPaint( hWnd, &ps );
+	if (!hdc){
+		return;
 	}
+
+	RECT rc = { 0 };
+	GetClientRect( hWnd, &rc );
+	const int cxClient = rc.right - rc.left;
+	const int cyClient = rc.bottom - rc.top;
+
+	// Everything is drawn into a back buffer and blitted to avoid flicker
+	const HDC hdcMem = CreateCompatibleDC( hdc );
+	const HBITMAP hbmMem = hdcMem ? CreateCompatibleBitmap( hdc, cxClient, cyClient ) : NULL;
+	const HDC hdcTarget = hbmMem ? hdcMem : hdc;
+	const HGDIOBJ hbmPrev = hbmMem ? SelectObject( hdcMem, hbmMem ) : NULL;
+
+	// Paint white so the control and its scroll bar read as one surface, distinct from the window chrome
+	FillRect( hdcTarget, &rc, reinterpret_cast<HBRUSH>( GetStockObject( WHITE_BRUSH ) ) );
+
+	if (pState->cchText > 0){
+		if (!pState->hFont){
+			pState->hFont = CreateOutputFont( hdcTarget );
+		}
+
+		if (pState->hFont){
+			const HGDIOBJ hPrev = SelectObject( hdcTarget, pState->hFont );
+			const int nBkMode = SetBkMode( hdcTarget, TRANSPARENT );
+			const COLORREF crText = SetTextColor( hdcTarget, RGB( 0, 0, 0 ) );
+
+			RECT rcContent = rc;
+			rcContent.left += WPG_OUTPUT_PADDING;
+			rcContent.right -= WPG_OUTPUT_PADDING;
+			const int avail = max( 1, rcContent.right - rcContent.left );
+
+			SIZE size = { 0 };
+			GetTextExtentPoint32( hdcTarget, pState->pszText, pState->cchText, &size );
+			if (size.cx <= avail){
+				// The text fits, so keep it centred within the control
+				DrawText( hdcTarget, pState->pszText, pState->cchText, &rcContent, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX );
+			}else{
+				// The text overflows: fall back to the locale's natural alignment and offset by the scroll position
+				RECT rcText = rcContent;
+				rcText.left = (rcContent.left - pState->nScrollPos);
+				DrawText( hdcTarget, pState->pszText, pState->cchText, &rcText, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX );
+			}
+
+			SetTextColor( hdcTarget, crText );
+			SetBkMode( hdcTarget, nBkMode );
+			SelectObject( hdcTarget, hPrev );
+		}
+	}
+
+	if (hbmMem){
+		BitBlt( hdc, 0, 0, cxClient, cyClient, hdcMem, 0, 0, SRCCOPY );
+		SelectObject( hdcMem, hbmPrev );
+		DeleteObject( hbmMem );
+	}
+	if (hdcMem){
+		DeleteDC( hdcMem );
+	}
+	EndPaint( hWnd, &ps );
 }
 
 // Handles messages sent to windows of the "WPGOutput" class
@@ -178,12 +253,6 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 					return FALSE;
 				}
 				SetWindowLongPtr( hWnd, 0, reinterpret_cast<LONG_PTR>( pState ) );
-
-				// Seed the buffer with the creation text, if any
-				LPCREATESTRUCT pcs = reinterpret_cast<LPCREATESTRUCT>( lParam );
-				if (pcs && pcs->lpszName){
-					SetOutputText( pState, pcs->lpszName );
-				}
 			}
 			break;
 
@@ -191,8 +260,10 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 			if (pState){
 				const BOOL bSet = SetOutputText( pState, reinterpret_cast<LPCTSTR>( lParam ) );
 				if (bSet){
-					DiscardOutputFont( pState );
-					InvalidateRect( hWnd, NULL, TRUE );
+					// The font is fixed, so only the scroll extent needs to be recomputed
+					pState->nScrollPos = 0;
+					UpdateOutputScroll( hWnd, pState );
+					InvalidateRect( hWnd, NULL, FALSE );
 				}
 				return bSet;
 			}
@@ -215,11 +286,80 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
 		case WM_SIZE:
 			if (pState){
-				// The available space has changed, so the text needs to be re-fitted
-				DiscardOutputFont( pState );
-				InvalidateRect( hWnd, NULL, TRUE );
+				// The font is fixed; only the scroll extent depends on the available width
+				UpdateOutputScroll( hWnd, pState );
+				InvalidateRect( hWnd, NULL, FALSE );
 			}
 			break;
+
+		case WM_HSCROLL:
+			if (pState){
+				SCROLLINFO si = { 0 };
+				si.cbSize = sizeof( si );
+				si.fMask = SIF_RANGE | SIF_POS | SIF_TRACKPOS;
+				if (GetScrollInfo( hWnd, SB_HORZ, &si )){
+					const int nStep = WPG_OUTPUT_FONT_POINTS;
+					int nPos = si.nPos;
+					switch (LOWORD( wParam )){
+						case SB_LINELEFT:	nPos -= nStep; break;
+						case SB_LINERIGHT:	nPos += nStep; break;
+						case SB_THUMBTRACK:
+						case SB_THUMBPOSITION:	nPos = si.nTrackPos; break;
+						case SB_LEFT:		nPos = si.nMin; break;
+						case SB_RIGHT:		nPos = si.nMax; break;
+						default:
+							break;
+					}
+
+					const int nMaxPos = max( 0, static_cast<int>( si.nMax ) - static_cast<int>( si.nPage ) + 1 );
+					nPos = max( 0, min( nPos, nMaxPos ) );
+					if (nPos != pState->nScrollPos){
+						pState->nScrollPos = nPos;
+						si.fMask = SIF_POS;
+						si.nPos = nPos;
+						SetScrollInfo( hWnd, SB_HORZ, &si, TRUE );
+						InvalidateRect( hWnd, NULL, FALSE );
+					}
+				}
+				return 0;
+			}
+			break;
+
+		case WM_LBUTTONDOWN:
+			if (pState && (GetMaxOutputScroll( hWnd, pState ) > 0)){
+				pState->bDragging = TRUE;
+				pState->nDragAnchorX = GET_X_LPARAM( lParam );
+				pState->nDragAnchorPos = pState->nScrollPos;
+				SetCapture( hWnd );
+				return 0;
+			}
+			break;
+
+		case WM_MOUSEMOVE:
+			if (pState && pState->bDragging){
+				// Dragging right reveals text to the right, so the offset moves opposite to the cursor
+				const int dx = GET_X_LPARAM( lParam ) - pState->nDragAnchorX;
+				ScrollOutputTo( hWnd, pState, pState->nDragAnchorPos - dx );
+				return 0;
+			}
+			break;
+
+		case WM_LBUTTONUP:
+			if (pState && pState->bDragging){
+				ReleaseCapture( );
+				return 0;
+			}
+			break;
+
+		case WM_CAPTURECHANGED:
+			if (pState){
+				pState->bDragging = FALSE;
+			}
+			break;
+
+		case WM_ERASEBKGND:
+			// The paint handler fills the whole client through a back buffer, so skip erasing to avoid flicker
+			return 1;
 
 		case WM_PAINT:
 			if (pState){
@@ -262,7 +402,7 @@ WPG_CORE_EXTERN_C WPG_CORE_API ATOM InitWPGOutputControl(__in HINSTANCE hInstanc
 	wcex.cbWndExtra = sizeof( PWPGOutputState );
 	wcex.hInstance = hInstance;
 	wcex.hCursor = LoadCursor( NULL, IDC_ARROW );
-	wcex.hbrBackground = NULL; // The background will be painted with the parent's brush
+	wcex.hbrBackground = NULL;
 	wcex.lpszClassName = WPG_OUTPUT_CLASS;
 	return RegisterClassEx( &wcex );
 }

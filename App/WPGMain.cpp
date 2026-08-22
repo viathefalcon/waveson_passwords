@@ -487,7 +487,7 @@ HRESULT OnReset(HWND hDlg) {
 HRESULT OnCopy(HWND hDlg) {
 
 	// Get a shareable copy of the contents of the output control
-	HWND hOutput = GetDlgItem( hDlg, IDC_EDIT_OUTPUT );
+	HWND hOutput = GetDlgItem( hDlg, IDC_OUTPUT );
 	const int cchOutput = 1 + GetWindowTextLength( hOutput );
 	const SIZE_T cbOutput = sizeof( TCHAR ) * cchOutput;
 	HGLOBAL hGlobal = GlobalAlloc( GMEM_MOVEABLE, cbOutput );
@@ -565,7 +565,7 @@ HRESULT OnRefresh(HWND hDlg) {
 	}
 
 	// Look for an early out
-	HWND hOut = GetDlgItem( hDlg, IDC_EDIT_OUTPUT );
+	HWND hOut = GetDlgItem( hDlg, IDC_OUTPUT );
 	if ((caps == WPGCapNONE)){
 		SetWindowText( hOut, TEXT( "" ) );
 		return S_OK;
@@ -592,7 +592,7 @@ HRESULT OnPwdGenerated(HWND hDlg, WPARAM wParam, LPARAM lParam) {
 		LPCTSTR pszPwd = reinterpret_cast<LPCTSTR>( wParam );
 
 		// Set the output
-		SetWindowText( GetDlgItem( hDlg, IDC_EDIT_OUTPUT ), pszPwd );
+		SetWindowText( GetDlgItem( hDlg, IDC_OUTPUT ), pszPwd );
 	}else{
 		SetErrorMsg( hDlg, wpgCapsFailed );
 	}
@@ -800,7 +800,7 @@ VOID SetErrorMsg(HWND hDlg, WPGCaps caps){
 	HINSTANCE hInstance = reinterpret_cast<HINSTANCE>( GetWindowLongPtr( hDlg, GWLP_HINSTANCE ) );
 	LPTSTR pszString = LoadStringProcessHeap( hInstance, u );
 	if (pszString){
-		SetWindowText( GetDlgItem( hDlg, IDC_EDIT_OUTPUT ), pszString );
+		SetWindowText( GetDlgItem( hDlg, IDC_OUTPUT ), pszString );
 		PH_FREE( pszString );
 	}
 }
@@ -883,6 +883,8 @@ VOID ExcludeWindowFromCapture(HWND hWnd) {
 		dwlConditionMask
 	);
 	if (isWindows10Version2004OrGreater){
+#if !defined (_DEBUG)
 		SetWindowDisplayAffinity( hWnd, WDA_EXCLUDEFROMCAPTURE );
+#endif
 	}
 }
