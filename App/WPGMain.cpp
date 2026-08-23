@@ -82,8 +82,8 @@ HRESULT OnCopy(HWND);
 // Called when a new password is to be generated
 HRESULT OnRefresh(HWND);
 
-// Called when a new password has been generated
-HRESULT OnPwdGenerated(HWND, WPARAM, LPARAM);
+// Called whenever the geneator fails
+HRESULT OnGeneratorFailed(HWND, WPARAM, LPARAM);
 
 // Called when the main dialog is closed
 HRESULT OnClose(HWND);
@@ -345,8 +345,8 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 			OnGeneratorStarted( hDlg, wParam, lParam );
 			break;
 
-		case AWM_WPG_GENERATED:
-			OnPwdGenerated( hDlg, wParam, lParam );
+		case AWM_WPG_FAILED:
+			OnGeneratorFailed( hDlg, wParam, lParam );
 			break;
 
 		case AWM_WPG_STOPPED:
@@ -378,7 +378,7 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 	return bResult;
 }
 
-HRESULT OnCreateTooltips(HWND hDlg) {
+static HRESULT OnCreateTooltips(HWND hDlg) {
 
 	// Use the dialog's width as the maximum width
 	RECT r = { 0 };
@@ -425,7 +425,10 @@ HRESULT OnCreateTooltips(HWND hDlg) {
 HRESULT OnInitDialog(HWND hDlg) {
 
 	// Kick off the generator thread
-	WPG_H wpgHandle = StartWPGGenerator( hDlg, c_cchMaxLength );
+	WPG_H wpgHandle = StartWPGGenerator(
+		hDlg,
+		GetDlgItem( hDlg, IDC_OUTPUT ),
+		c_cchMaxLength );
 
 	// Prevent the window's contents from appearing in screen captures, on OSes that support it
 	ExcludeWindowFromCapture( hDlg );
@@ -584,19 +587,13 @@ HRESULT OnRefresh(HWND hDlg) {
 	return E_POINTER;
 }
 
-HRESULT OnPwdGenerated(HWND hDlg, WPARAM wParam, LPARAM lParam) {
+HRESULT OnGeneratorFailed(HWND hDlg, WPARAM wParam, LPARAM lParam) {
 
-	const WPGCaps wpgCapsFailed = static_cast<WPGCaps>( lParam );
-	HRESULT hResult = (wpgCapsFailed == WPGCapNONE) ? S_OK : E_FAIL;
-	if (SUCCEEDED( hResult )){
-		LPCTSTR pszPwd = reinterpret_cast<LPCTSTR>( wParam );
-
-		// Set the output
-		SetWindowText( GetDlgItem( hDlg, IDC_OUTPUT ), pszPwd );
-	}else{
+	const auto wpgCapsFailed = static_cast<WPGCaps>( lParam );
+	if (wpgCapsFailed != WPGCapNONE){
 		SetErrorMsg( hDlg, wpgCapsFailed );
 	}
-	return hResult;
+	return S_OK;
 }
 
 HRESULT OnClose(HWND hDlg) {

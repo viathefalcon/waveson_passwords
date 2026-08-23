@@ -20,13 +20,14 @@ DECLARE_HANDLE(WPG_H);
 
 #define AWM_WPG_STARTED		(WM_APP+1)
 #define AWM_WPG_GENERATED	(AWM_WPG_STARTED+1)
-#define AWM_WPG_STOPPED		(AWM_WPG_GENERATED+1)
+#define AWM_WPG_FAILED		(AWM_WPG_GENERATED+1)
+#define AWM_WPG_STOPPED		(AWM_WPG_FAILED+1)
 
 // Functions
 //
 
 // Starts the thread
-WPG_CORE_EXTERN_C WPG_CORE_API WPG_H StartWPGGenerator(HWND, BYTE);
+WPG_CORE_EXTERN_C WPG_CORE_API WPG_H StartWPGGenerator(HWND, HWND, BYTE);
 
 // Generates a password in the given output buffer; returns an enumeration of the generators which failed
 WPG_CORE_EXTERN_C WPG_CORE_API VOID WPGPwdGenAsync(__in WPG_H, __in BYTE, __in WPGCaps);

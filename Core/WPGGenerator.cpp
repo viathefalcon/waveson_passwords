@@ -42,7 +42,8 @@ typedef struct _WPG_INSTANCE {
 
 typedef struct _WPG_THREAD_PROPS {
 
-	HWND hWnd;
+	HWND hWndHost;
+	HWND hWndDest;
 	LONG* plStop;
 
 	BYTE cchMax;
@@ -87,7 +88,7 @@ HRESULT OnEnablePwdDuplicates(HWND, WPARAM, LPARAM);
 // Functions
 //
 
-WPG_H StartWPGGenerator(HWND hWnd, BYTE cchMax) {
+WPG_H StartWPGGenerator(HWND hWndHost, HWND hWndDest, BYTE cchMax) {
 
 	// Allocate the structure
 	PWPG_INSTANCE pInstance = reinterpret_cast<PWPG_INSTANCE>(
@@ -104,7 +105,8 @@ WPG_H StartWPGGenerator(HWND hWnd, BYTE cchMax) {
 		PH_ALLOC( sizeof( WPG_THREAD_PROPS ) )
 	);
 	pThreadProps->plStop = pInstance->plStop;
-	pThreadProps->hWnd = hWnd;
+	pThreadProps->hWndHost = hWndHost;
+	pThreadProps->hWndDest = hWndDest;
 	pThreadProps->cchMax = cchMax;
 
 	// Spin the thread
@@ -268,7 +270,7 @@ DWORD WINAPI WPGGeneratorThreadProc(__in LPVOID lpParameter) {
 	}
 
 	// Cleanup
-	HWND hWndHost = pThreadProps->hWnd;
+	HWND hWndHost = pThreadProps->hWndHost;
 	if (pThreadProps->pszBuffer){
 		PH_FREE( pThreadProps->pszBuffer );
 		pThreadProps->pszBuffer = NULL;
@@ -314,7 +316,7 @@ LRESULT CALLBACK WPGGeneratorWindowProcedure(HWND hWnd, UINT uMessage, WPARAM wP
 				const auto caps = pThreadProps->wpg->Caps( );
 				const auto vex = pThreadProps->wpg->Vex( );
 				PostMessage(
-					pThreadProps->hWnd,
+					pThreadProps->hWndHost,
 					AWM_WPG_STARTED,
 					static_cast<WPARAM>( caps ),
 					static_cast<LPARAM>( vex )
@@ -364,7 +366,7 @@ HRESULT OnGeneratePassword(HWND hWnd, WPARAM wParam, LPARAM lParam) {
 		BYTE cch = fEmpty ? 0 : min( cchLength, pThreadProps->cchMax );
 
 		// Do the password generation
-		WPGCaps wpgCapsFailed = pThreadProps->wpg->Generate(
+		const auto wpgCapsFailed = pThreadProps->wpg->Generate(
 			pThreadProps->pszBuffer,
 			cch,
 			wpgCaps,
@@ -373,27 +375,37 @@ HRESULT OnGeneratePassword(HWND hWnd, WPARAM wParam, LPARAM lParam) {
 			pThreadProps->fDuplicatesAllowed
 		);
 
-#if defined (_DEBUG)
 		if (wpgCapsFailed == WPGCapNONE){
+#if defined (_DEBUG)
 			constexpr size_t cchBuffer = 128;
 			TCHAR szBuffer[128] = { 0 };
 			StringCchPrintf(szBuffer, cchBuffer, TEXT( "Generator thread generated password (%llu): " ), static_cast<size_t>( cch ) );
 			OutputDebugString( szBuffer );
 			OutputDebugString( pThreadProps->pszBuffer );
 			OutputDebugString( TEXT( "\x0A" ) );
+#endif
+			// Send to the target window (synchronously)
+			SendMessage(
+				pThreadProps->hWndDest,
+				AWM_WPG_GENERATED,
+				reinterpret_cast<WPARAM>( pThreadProps->pszBuffer ),
+				static_cast<LPARAM>( wpgCapsFailed )
+			);
+			SecureZeroMemory( pThreadProps->pszBuffer, pThreadProps->cchMax );
+
 		}else{
+#if defined (_DEBUG)
 			OutputDebugString( TEXT( "Failed to generate password in generator thread\x0A" ) );
-		}
 #endif
 
-		// Send to the target window (synchronously)
-		SendMessage(
-			pThreadProps->hWnd,
-			AWM_WPG_GENERATED,
-			reinterpret_cast<WPARAM>( pThreadProps->pszBuffer ),
-			static_cast<LPARAM>( wpgCapsFailed )
-		);
-		SecureZeroMemory( pThreadProps->pszBuffer, pThreadProps->cchMax );
+			SendMessage(
+				pThreadProps->hWndHost,
+				AWM_WPG_FAILED,
+				0,
+				static_cast<LPARAM>( wpgCapsFailed )
+			);
+		}
+
 		return S_OK;
 	}
 	return E_POINTER;

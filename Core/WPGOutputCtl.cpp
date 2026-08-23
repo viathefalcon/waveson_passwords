@@ -16,6 +16,7 @@
 // Local Project Headers
 #include "heaps.h"
 #include "WPGOutputCtl.h"
+#include "WPGGenerator.h"
 
 // Macros
 //
@@ -86,7 +87,7 @@ static int MeasureOutputText(HWND hWnd, PWPGOutputState pState) {
 		if (pState->hFont && (pState->cchText > 0)){
 			SIZE size = { 0 };
 			const HGDIOBJ hPrev = SelectObject( hdc, pState->hFont );
-			if (GetTextExtentPoint32( hdc, pState->pszText, pState->cchText, &size )){
+			if (GetTextExtentPoint32( hdc, pState->pszText, static_cast<int>( pState->cchText ), &size )){
 				cx = size.cx;
 			}
 			SelectObject( hdc, hPrev );
@@ -213,15 +214,16 @@ static VOID PaintOutput(HWND hWnd, PWPGOutputState pState) {
 			const int avail = max( 1, rcContent.right - rcContent.left );
 
 			SIZE size = { 0 };
-			GetTextExtentPoint32( hdcTarget, pState->pszText, pState->cchText, &size );
+			const auto cchText = static_cast<int>( pState->cchText );
+			GetTextExtentPoint32( hdcTarget, pState->pszText, cchText, &size );
 			if (size.cx <= avail){
 				// The text fits, so keep it centred within the control
-				DrawText( hdcTarget, pState->pszText, pState->cchText, &rcContent, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX );
+				DrawText( hdcTarget, pState->pszText, cchText, &rcContent, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX );
 			}else{
 				// The text overflows: fall back to the locale's natural alignment and offset by the scroll position
 				RECT rcText = rcContent;
 				rcText.left = (rcContent.left - pState->nScrollPos);
-				DrawText( hdcTarget, pState->pszText, pState->cchText, &rcText, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX );
+				DrawText( hdcTarget, pState->pszText, cchText, &rcText, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX );
 			}
 
 			SetTextColor( hdcTarget, crText );
@@ -256,27 +258,14 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 			}
 			break;
 
-		case WM_SETTEXT:
-			if (pState){
-				const BOOL bSet = SetOutputText( pState, reinterpret_cast<LPCTSTR>( lParam ) );
-				if (bSet){
-					// The font is fixed, so only the scroll extent needs to be recomputed
-					pState->nScrollPos = 0;
-					UpdateOutputScroll( hWnd, pState );
-					InvalidateRect( hWnd, NULL, FALSE );
-				}
-				return bSet;
-			}
-			return FALSE;
-
 		case WM_GETTEXTLENGTH:
 			return pState ? pState->cchText : 0;
 
 		case WM_GETTEXT:
 			if (pState && wParam){
 				LPTSTR pszBuffer = reinterpret_cast<LPTSTR>( lParam );
-				const int cch = min( static_cast<int>( wParam ) - 1, pState->cchText );
-				for (int n = 0; n < cch; ++n){
+				const auto cch = min( static_cast<size_t>( wParam ) - 1, pState->cchText );
+				for (size_t n = 0; n < cch; ++n){
 					pszBuffer[n] = pState->pszText[n];
 				}
 				pszBuffer[cch] = TEXT( '\0' );
@@ -379,6 +368,20 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 			}
             SetWindowLongPtr( hWnd, 0, 0 );
 			break;
+
+		case AWM_WPG_GENERATED:
+			if (pState){
+				LPCTSTR pszPwd = reinterpret_cast<LPCTSTR>( wParam );
+				const BOOL bSet = SetOutputText( pState, pszPwd );
+				if (bSet){
+					// The font is fixed, so only the scroll extent needs to be recomputed
+					pState->nScrollPos = 0;
+					UpdateOutputScroll( hWnd, pState );
+					InvalidateRect( hWnd, NULL, FALSE );
+				}
+				return bSet;
+			}
+			return FALSE;
 
 		default:
 			break;
