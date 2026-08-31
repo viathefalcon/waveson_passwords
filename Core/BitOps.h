@@ -258,6 +258,8 @@ public:
 	typedef size_t size_type;
 	typedef unsigned char* operand_type;
 
+    virtual ~xor_t() = default;
+
 	virtual size_type apply(operand_type front, operand_type back, size_type cb) const {
 
 		for (decltype(cb) i = 0; i < cb; ++i){

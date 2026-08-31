@@ -23,6 +23,20 @@ DECLARE_HANDLE(WPG_H);
 #define AWM_WPG_FAILED		(AWM_WPG_GENERATED+1)
 #define AWM_WPG_STOPPED		(AWM_WPG_FAILED+1)
 
+// Types
+//
+
+typedef struct _WPG_BUFFER {
+
+	size_t cch;
+	TCHAR szBuf[1];
+
+	inline size_t Cb(void) const {
+		return sizeof( WPG_BUFFER ) + (sizeof( TCHAR ) * cch);
+	}
+
+} WPG_BUFFER, * PWPG_BUFFER;
+
 // Functions
 //
 

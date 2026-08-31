@@ -12,6 +12,7 @@
 
 // Local Project Headers
 #include "heaps.h"
+#include "dllmain.h"
 
 // Declarations
 #include "WPGGenerator.h"
@@ -47,7 +48,7 @@ typedef struct _WPG_THREAD_PROPS {
 	LONG* plStop;
 
 	BYTE cchMax;
-	LPTSTR pszBuffer;
+	PWPG_BUFFER pWpgBuffer;
 
 	std::shared_ptr<wpg_t> wpg;
 
@@ -97,7 +98,7 @@ WPG_H StartWPGGenerator(HWND hWndHost, HWND hWndDest, BYTE cchMax) {
 	if (pInstance == NULL){
 		return NULL;
 	}
-	pInstance->plStop = reinterpret_cast<LONG*>( _aligned_malloc( sizeof( LONG ), sizeof( LONG ) ) );
+	pInstance->plStop = reinterpret_cast<LONG*>( _aligned_malloc( sizeof( LONG ), alignof( LONG ) ) );
 	*(pInstance->plStop) = WPG_NON_STOP;
 
 	// Allocate the control structure
@@ -210,13 +211,19 @@ DWORD WINAPI WPGGeneratorThreadProc(__in LPVOID lpParameter) {
 	PWPG_THREAD_PROPS pThreadProps = reinterpret_cast<PWPG_THREAD_PROPS>(
 		lpParameter
 	);
-	pThreadProps->pszBuffer = static_cast<LPTSTR>(
-		PH_ALLOC( sizeof( TCHAR ) * (static_cast<SIZE_T>( pThreadProps->cchMax ) + 1U) )
+
+	// Allocate the buffer
+	WPG_BUFFER wpgBuffer = { 0 };
+	wpgBuffer.cch = pThreadProps->cchMax;
+	const auto cbBuffer = wpgBuffer.Cb( );
+	pThreadProps->pWpgBuffer = static_cast<PWPG_BUFFER>(
+		_aligned_malloc( cbBuffer, alignof( WPG_BUFFER ) )
 	);
+	SecureZeroMemory( pThreadProps->pWpgBuffer, cbBuffer );
 	pThreadProps->wpg = wpg_t::New( );
 
 	// Create the message window
-	HINSTANCE hInstance = static_cast<HINSTANCE>( GetModuleHandle( NULL ) );
+	const auto hInstance = GetCoreInstance( );
 	HWND hWnd = NULL;
 	WNDCLASSEX wcx = { 0 };
 	wcx.cbSize = sizeof( WNDCLASSEX );
@@ -271,9 +278,9 @@ DWORD WINAPI WPGGeneratorThreadProc(__in LPVOID lpParameter) {
 
 	// Cleanup
 	HWND hWndHost = pThreadProps->hWndHost;
-	if (pThreadProps->pszBuffer){
-		PH_FREE( pThreadProps->pszBuffer );
-		pThreadProps->pszBuffer = NULL;
+	if (pThreadProps->pWpgBuffer){
+		_aligned_free( pThreadProps->pWpgBuffer );
+		pThreadProps->pWpgBuffer = NULL;
 	}
 	if (pThreadProps->pszAlphabet){
 		PH_FREE( const_cast<LPTSTR>( pThreadProps->pszAlphabet ) );
@@ -366,8 +373,9 @@ HRESULT OnGeneratePassword(HWND hWnd, WPARAM wParam, LPARAM lParam) {
 		BYTE cch = fEmpty ? 0 : min( cchLength, pThreadProps->cchMax );
 
 		// Do the password generation
+		auto pWpgBuffer = pThreadProps->pWpgBuffer;
 		const auto wpgCapsFailed = pThreadProps->wpg->Generate(
-			pThreadProps->pszBuffer,
+			pWpgBuffer->szBuf,
 			cch,
 			wpgCaps,
 			&(cch),
@@ -381,18 +389,22 @@ HRESULT OnGeneratePassword(HWND hWnd, WPARAM wParam, LPARAM lParam) {
 			TCHAR szBuffer[128] = { 0 };
 			StringCchPrintf(szBuffer, cchBuffer, TEXT( "Generator thread generated password (%llu): " ), static_cast<size_t>( cch ) );
 			OutputDebugString( szBuffer );
-			OutputDebugString( pThreadProps->pszBuffer );
+			OutputDebugString( pWpgBuffer->szBuf );
 			OutputDebugString( TEXT( "\x0A" ) );
 #endif
 			// Send to the target window (synchronously)
+			pWpgBuffer->cch = cch;
 			SendMessage(
 				pThreadProps->hWndDest,
 				AWM_WPG_GENERATED,
-				reinterpret_cast<WPARAM>( pThreadProps->pszBuffer ),
+				reinterpret_cast<WPARAM>( pWpgBuffer ),
 				static_cast<LPARAM>( wpgCapsFailed )
 			);
-			SecureZeroMemory( pThreadProps->pszBuffer, pThreadProps->cchMax );
 
+			// Tidy up
+			pWpgBuffer->cch = pThreadProps->cchMax;
+			const auto cb = pWpgBuffer->Cb( );
+			SecureZeroMemory( pWpgBuffer, cb );
 		}else{
 #if defined (_DEBUG)
 			OutputDebugString( TEXT( "Failed to generate password in generator thread\x0A" ) );

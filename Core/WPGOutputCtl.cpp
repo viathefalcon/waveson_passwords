@@ -32,14 +32,15 @@
 // Holds the per-window state
 typedef struct _WPGOutputState {
 
-	LPTSTR pszText;		// The internal text buffer
-	size_t cchText;		// The length, in characters, of the text in the buffer (excluding the terminator)
-	size_t cchBuffer;	// The capacity, in characters, of the buffer (including the terminator)
 	HFONT hFont;		// The (cached) font with which the text is currently rendered
 	int nScrollPos;		// The current horizontal scroll offset, in pixels
 	BOOL bDragging;		// Whether the text is currently being drag-scrolled with the mouse
 	int nDragAnchorX;	// The client x-coordinate at which the drag began, in pixels
 	int nDragAnchorPos;	// The scroll offset at which the drag began, in pixels
+
+	// Gives the state's internal buffer
+	SIZE_T cbBuffer;
+	LPVOID pBuffer;
 
 } WPGOutputState, *PWPGOutputState;
 
@@ -63,6 +64,7 @@ static VOID DiscardOutputFont(PWPGOutputState pState) {
 // Creates the monospace font at the fixed size, scaled for the DPI of the given device
 static HFONT CreateOutputFont(HDC hdc) {
 
+	// An empty face name leaves the font mapper to pick the default which matches the pitch and family
 	LOGFONT lf = { 0 };
 	lf.lfHeight = -MulDiv( WPG_OUTPUT_FONT_POINTS, GetDeviceCaps( hdc, LOGPIXELSY ), 72 );
 	lf.lfWeight = FW_NORMAL;
@@ -71,12 +73,17 @@ static HFONT CreateOutputFont(HDC hdc) {
 	lf.lfClipPrecision = CLIP_DEFAULT_PRECIS;
 	lf.lfQuality = CLEARTYPE_QUALITY;
 	lf.lfPitchAndFamily = FIXED_PITCH | FF_MODERN;
-	// An empty face name leaves the font mapper to pick the default which matches the pitch and family
 	return CreateFontIndirect( &lf );
 }
 
-// Ensures the cached font exists and returns the pixel width of the current text
+// Ensures the cached font exists and returns the pixel width of the given text buffer
 static int MeasureOutputText(HWND hWnd, PWPGOutputState pState) {
+
+	// Look for an early out
+	const auto pWpgBuffer = reinterpret_cast<PWPG_BUFFER>( pState->pBuffer );
+	if ((pWpgBuffer == nullptr) || (pWpgBuffer->cch < 1)){
+		return 0;
+	}
 
 	int cx = 0;
 	const HDC hdc = GetDC( hWnd );
@@ -84,10 +91,10 @@ static int MeasureOutputText(HWND hWnd, PWPGOutputState pState) {
 		if (!pState->hFont){
 			pState->hFont = CreateOutputFont( hdc );
 		}
-		if (pState->hFont && (pState->cchText > 0)){
+		if (pState->hFont){
 			SIZE size = { 0 };
 			const HGDIOBJ hPrev = SelectObject( hdc, pState->hFont );
-			if (GetTextExtentPoint32( hdc, pState->pszText, static_cast<int>( pState->cchText ), &size )){
+			if (GetTextExtentPoint32( hdc, pWpgBuffer->szBuf, static_cast<int>( pWpgBuffer->cch ), &size )){
 				cx = size.cx;
 			}
 			SelectObject( hdc, hPrev );
@@ -145,34 +152,36 @@ static VOID ScrollOutputTo(HWND hWnd, PWPGOutputState pState, int nPos) {
 }
 
 // Copies the given text into the window's internal buffer
-static BOOL SetOutputText(PWPGOutputState pState, LPCTSTR pszText) {
+static BOOL SetOutputText(PWPGOutputState pState, PWPG_BUFFER pWpgBuffer) {
 
-	size_t cch = 0;
-	auto hr = StringCchLength( pszText, STRSAFE_MAX_CCH, &cch );
-	if (FAILED( hr )){
-		return FALSE;
+	// Figure out the number of blocks needed
+	const auto cb = pWpgBuffer->Cb( );
+	auto blocks = (cb / CRYPTPROTECTMEMORY_BLOCK_SIZE);
+	if (cb % CRYPTPROTECTMEMORY_BLOCK_SIZE){
+		blocks += 1;
 	}
+	const auto cbBuffer = (blocks * CRYPTPROTECTMEMORY_BLOCK_SIZE);
 
-	if (cch >= pState->cchBuffer){
-		LPTSTR psz = reinterpret_cast<LPTSTR>( PH_ALLOC( (cch + 1) * sizeof( TCHAR ) ) );
-		if (!psz){
+	// (Re)allocate the buffer if needed
+	if (cbBuffer > pState->cbBuffer){
+		auto pBuffer = _aligned_malloc( cbBuffer, alignof( WPG_BUFFER ) );
+		if (!pBuffer){
 			return FALSE;
 		}
-		if (pState->pszText){
-			SecureZeroMemory( pState->pszText, pState->cchBuffer * sizeof( TCHAR ) );
-			PH_FREE( pState->pszText );
+
+		// Cleanup the old buffer
+		if (pState->pBuffer){
+			SecureZeroMemory( pState->pBuffer, pState->cbBuffer );
+			_aligned_free( pState->pBuffer );
 		}
-		pState->pszText = psz;
-		pState->cchBuffer = (cch + 1);
+
+		pState->pBuffer = pBuffer;
+		pState->cbBuffer = cbBuffer;
 	}
 
-	// Scrub the previous contents, so none of it survives in the tail of the buffer
-	SecureZeroMemory( pState->pszText, pState->cchBuffer * sizeof( TCHAR ) );
-	if (cch > 0){
-		StringCchCopyN( pState->pszText, pState->cchBuffer, pszText, cch );
-	}
-	pState->cchText = cch;
-	return TRUE;
+	// Copy
+	CopyMemory( pState->pBuffer, pWpgBuffer, cb );
+	return TRUE; // TODO Protect..
 }
 
 // Paints the window, drawing through an off-screen buffer so scrolling doesn't flicker
@@ -198,7 +207,8 @@ static VOID PaintOutput(HWND hWnd, PWPGOutputState pState) {
 	// Paint white so the control and its scroll bar read as one surface, distinct from the window chrome
 	FillRect( hdcTarget, &rc, reinterpret_cast<HBRUSH>( GetStockObject( WHITE_BRUSH ) ) );
 
-	if (pState->cchText > 0){
+	const auto pWpgBuffer = reinterpret_cast<PWPG_BUFFER>( pState->pBuffer );
+	if ((pWpgBuffer) && (pWpgBuffer->cch > 0)){
 		if (!pState->hFont){
 			pState->hFont = CreateOutputFont( hdcTarget );
 		}
@@ -214,16 +224,16 @@ static VOID PaintOutput(HWND hWnd, PWPGOutputState pState) {
 			const int avail = max( 1, rcContent.right - rcContent.left );
 
 			SIZE size = { 0 };
-			const auto cchText = static_cast<int>( pState->cchText );
-			GetTextExtentPoint32( hdcTarget, pState->pszText, cchText, &size );
+			const auto cchText = static_cast<int>( pWpgBuffer->cch );
+			GetTextExtentPoint32( hdcTarget, pWpgBuffer->szBuf, cchText, &size );
 			if (size.cx <= avail){
 				// The text fits, so keep it centred within the control
-				DrawText( hdcTarget, pState->pszText, cchText, &rcContent, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX );
+				DrawText( hdcTarget, pWpgBuffer->szBuf, cchText, &rcContent, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX );
 			}else{
 				// The text overflows: fall back to the locale's natural alignment and offset by the scroll position
 				RECT rcText = rcContent;
 				rcText.left = (rcContent.left - pState->nScrollPos);
-				DrawText( hdcTarget, pState->pszText, cchText, &rcText, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX );
+				DrawText( hdcTarget, pWpgBuffer->szBuf, cchText, &rcText, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX );
 			}
 
 			SetTextColor( hdcTarget, crText );
@@ -243,6 +253,18 @@ static VOID PaintOutput(HWND hWnd, PWPGOutputState pState) {
 	EndPaint( hWnd, &ps );
 }
 
+static void CleanupState(PWPGOutputState pState) {
+
+	if (pState){
+		DiscardOutputFont( pState );
+		if (pState->pBuffer){
+			SecureZeroMemory( pState->pBuffer, pState->cbBuffer );
+			_aligned_free( pState->pBuffer );
+		}
+		PH_FREE( pState );
+	}
+}
+
 // Handles messages sent to windows of the "WPGOutput" class
 static LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 
@@ -259,14 +281,20 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 			break;
 
 		case WM_GETTEXTLENGTH:
-			return pState ? pState->cchText : 0;
+			if (pState){
+				const auto pWpgBuffer = reinterpret_cast<PWPG_BUFFER>( pState->pBuffer );
+				return pWpgBuffer->cch;
+			}
+			return 0;
 
 		case WM_GETTEXT:
 			if (pState && wParam){
+				const auto pWpgBuffer = reinterpret_cast<PWPG_BUFFER>( pState->pBuffer );
+
 				LPTSTR pszBuffer = reinterpret_cast<LPTSTR>( lParam );
-				const auto cch = min( static_cast<size_t>( wParam ) - 1, pState->cchText );
+				const auto cch = min( static_cast<size_t>( wParam ) - 1, pWpgBuffer->cch );
 				for (size_t n = 0; n < cch; ++n){
-					pszBuffer[n] = pState->pszText[n];
+					pszBuffer[n] = pWpgBuffer->szBuf[n];
 				}
 				pszBuffer[cch] = TEXT( '\0' );
 				return cch;
@@ -358,21 +386,13 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 			break;
 
 		case WM_NCDESTROY:
-			if (pState){
-				DiscardOutputFont( pState );
-				if (pState->pszText){
-					SecureZeroMemory( pState->pszText, pState->cchBuffer * sizeof( TCHAR ) );
-					PH_FREE( pState->pszText );
-				}
-				PH_FREE( pState );
-			}
+			CleanupState( pState );
             SetWindowLongPtr( hWnd, 0, 0 );
 			break;
 
 		case AWM_WPG_GENERATED:
 			if (pState){
-				LPCTSTR pszPwd = reinterpret_cast<LPCTSTR>( wParam );
-				const BOOL bSet = SetOutputText( pState, pszPwd );
+				const BOOL bSet = SetOutputText( pState, reinterpret_cast<PWPG_BUFFER>( wParam ) );
 				if (bSet){
 					// The font is fixed, so only the scroll extent needs to be recomputed
 					pState->nScrollPos = 0;

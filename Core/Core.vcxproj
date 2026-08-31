@@ -254,6 +254,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="BitOps.h" />
+    <ClInclude Include="dllmain.h" />
     <ClInclude Include="exports.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="heaps.h" />

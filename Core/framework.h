@@ -11,3 +11,6 @@
 
 // Safe String Headers
 #include <strsafe.h>
+
+// Data Protection API Headers
+#include <dpapi.h>
