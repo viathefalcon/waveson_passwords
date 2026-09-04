@@ -130,7 +130,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>tbs.lib;$(OutDir)RdRandStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>tbs.lib;Crypt32.lib;$(OutDir)RdRandStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <EnableSegmentHeap>true</EnableSegmentHeap>
@@ -154,7 +154,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>tbs.lib;$(OutDir)RdRandStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>tbs.lib;Crypt32.lib;$(OutDir)RdRandStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <EnableSegmentHeap>true</EnableSegmentHeap>
@@ -177,7 +177,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>tbs.lib;$(OutDir)RdRandStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>tbs.lib;Crypt32.lib;$(OutDir)RdRandStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <EnableSegmentHeap>true</EnableSegmentHeap>
@@ -201,7 +201,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>tbs.lib;$(OutDir)RdRandStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>tbs.lib;Crypt32.lib;$(OutDir)RdRandStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <EnableSegmentHeap>true</EnableSegmentHeap>
@@ -222,7 +222,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>tbs.lib;$(OutDir)RdRandStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>tbs.lib;Crypt32.lib;$(OutDir)RdRandStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <EnableSegmentHeap>true</EnableSegmentHeap>
@@ -246,7 +246,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>tbs.lib;$(OutDir)RdRandStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>tbs.lib;Crypt32.lib;$(OutDir)RdRandStatic.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest>
       <EnableSegmentHeap>true</EnableSegmentHeap>

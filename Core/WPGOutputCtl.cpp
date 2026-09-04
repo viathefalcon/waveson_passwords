@@ -33,16 +33,24 @@
 typedef struct _WPGOutputState {
 
 	HFONT hFont;		// The (cached) font with which the text is currently rendered
+	HBITMAP hBitmap;	// The (cached) bitmap containing the rendered output text
+	SIZE sizeBitmap;	// The backing bitmap dimensions, in pixels
 	int nScrollPos;		// The current horizontal scroll offset, in pixels
 	BOOL bDragging;		// Whether the text is currently being drag-scrolled with the mouse
 	int nDragAnchorX;	// The client x-coordinate at which the drag began, in pixels
 	int nDragAnchorPos;	// The scroll offset at which the drag began, in pixels
+	size_t cch;			// Gives the number of characters held in the internal buffer
 
 	// Gives the state's internal buffer
 	SIZE_T cbBuffer;
 	LPVOID pBuffer;
 
 } WPGOutputState, *PWPGOutputState;
+
+// Constants
+//
+
+static const DWORD c_dwCryptProtectMemoryFlags = CRYPTPROTECTMEMORY_SAME_PROCESS;
 
 // Functions
 //
@@ -61,6 +69,17 @@ static VOID DiscardOutputFont(PWPGOutputState pState) {
 	}
 }
 
+// Releases the cached text bitmap, if any
+static VOID DiscardOutputBitmap(PWPGOutputState pState) {
+
+	if (pState->hBitmap){
+		DeleteObject( pState->hBitmap );
+		pState->hBitmap = NULL;
+	}
+	pState->sizeBitmap.cx = 0;
+	pState->sizeBitmap.cy = 0;
+}
+
 // Creates the monospace font at the fixed size, scaled for the DPI of the given device
 static HFONT CreateOutputFont(HDC hdc) {
 
@@ -76,32 +95,87 @@ static HFONT CreateOutputFont(HDC hdc) {
 	return CreateFontIndirect( &lf );
 }
 
-// Ensures the cached font exists and returns the pixel width of the given text buffer
-static int MeasureOutputText(HWND hWnd, PWPGOutputState pState) {
+// Renders the current output string into a bitmap owned by the window state
+static BOOL RenderOutputBitmap(HWND hWnd, PWPGOutputState pState) {
 
-	// Look for an early out
 	const auto pWpgBuffer = reinterpret_cast<PWPG_BUFFER>( pState->pBuffer );
 	if ((pWpgBuffer == nullptr) || (pWpgBuffer->cch < 1)){
-		return 0;
+		return TRUE;
 	}
 
-	int cx = 0;
 	const HDC hdc = GetDC( hWnd );
-	if (hdc){
-		if (!pState->hFont){
-			pState->hFont = CreateOutputFont( hdc );
-		}
-		if (pState->hFont){
-			SIZE size = { 0 };
-			const HGDIOBJ hPrev = SelectObject( hdc, pState->hFont );
-			if (GetTextExtentPoint32( hdc, pWpgBuffer->szBuf, static_cast<int>( pWpgBuffer->cch ), &size )){
-				cx = size.cx;
-			}
-			SelectObject( hdc, hPrev );
+	if (!hdc){
+		return FALSE;
+	}
+	if (!pState->hFont){
+		pState->hFont = CreateOutputFont( hdc );
+	}
+	if (!pState->hFont){
+		ReleaseDC( hWnd, hdc );
+		return FALSE;
+	}
+
+	SIZE size = { 0 };
+	const HGDIOBJ hPrev = SelectObject( hdc, pState->hFont );
+	const BOOL bMeasured = GetTextExtentPoint32( hdc, pWpgBuffer->szBuf, static_cast<int>( pWpgBuffer->cch ), &size );
+	SelectObject( hdc, hPrev );
+	if (!bMeasured || (size.cx < 1) || (size.cy < 1)){
+		ReleaseDC( hWnd, hdc );
+		return FALSE;
+	}
+
+	RECT rcClient = { 0 };
+	GetClientRect( hWnd, &rcClient );
+	const int cxClient = max( 1, rcClient.right - rcClient.left );
+	const int cyClient = max( 1, rcClient.bottom - rcClient.top );
+	const int cxBitmap = max( cxClient, size.cx + (2 * WPG_OUTPUT_PADDING) );
+	const HDC hdcMem = CreateCompatibleDC( hdc );
+	const HBITMAP hBitmap = hdcMem ? CreateCompatibleBitmap( hdc, cxBitmap, cyClient ) : NULL;
+	if (!hBitmap){
+		if (hdcMem){
+			DeleteDC( hdcMem );
 		}
 		ReleaseDC( hWnd, hdc );
+		return FALSE;
 	}
-	return cx;
+
+	const HGDIOBJ hbmPrev = SelectObject( hdcMem, hBitmap );
+	RECT rcBitmap = { 0, 0, cxBitmap, cyClient };
+	FillRect( hdcMem, &rcBitmap, reinterpret_cast<HBRUSH>( GetStockObject( WHITE_BRUSH ) ) );
+	const HGDIOBJ hFontPrev = SelectObject( hdcMem, pState->hFont );
+	SetBkMode( hdcMem, TRANSPARENT );
+	const int x = (cxBitmap == cxClient) ? ((cxClient - size.cx) / 2) : WPG_OUTPUT_PADDING;
+	const int y = (cyClient - size.cy) / 2;
+	TextOut( hdcMem, x, y, pWpgBuffer->szBuf, static_cast<int>( pWpgBuffer->cch ) );
+	SelectObject( hdcMem, hFontPrev );
+	SelectObject( hdcMem, hbmPrev );
+	DeleteDC( hdcMem );
+	ReleaseDC( hWnd, hdc );
+
+	// Assign and return
+	pState->hBitmap = hBitmap;
+	pState->sizeBitmap.cx = cxBitmap;
+	pState->sizeBitmap.cy = cyClient;
+	return TRUE;
+}
+
+// Un-protects the text prior to and re-protects it after rendering it into a bitmap
+static BOOL UnlockRenderOutputBitmap(HWND hWnd, PWPGOutputState pState) {
+
+	// Clear the slate
+	DiscardOutputBitmap( pState );
+
+	// Look for an early out
+	if (pState->cch < 1 || pState->pBuffer == NULL){
+		return TRUE;
+	}
+
+	if (CryptUnprotectMemory( pState->pBuffer, static_cast<DWORD>( pState->cbBuffer ), c_dwCryptProtectMemoryFlags )){
+		const auto result = RenderOutputBitmap( hWnd, pState );
+		CryptProtectMemory( pState->pBuffer, static_cast<DWORD>( pState->cbBuffer ), c_dwCryptProtectMemoryFlags );
+		return result;
+	}
+	return FALSE;
 }
 
 // Updates the horizontal scroll bar to reflect the current text; the bar stays visible but disabled while the text fits
@@ -109,8 +183,8 @@ static VOID UpdateOutputScroll(HWND hWnd, PWPGOutputState pState) {
 
 	RECT rc = { 0 };
 	GetClientRect( hWnd, &rc );
-	const int avail = max( 1, (rc.right - rc.left) - (2 * WPG_OUTPUT_PADDING) );
-	const int cxText = MeasureOutputText( hWnd, pState );
+	const int avail = max( 1, rc.right - rc.left );
+	const int cxText = pState->sizeBitmap.cx;
 
 	const int nOverflow = (cxText > avail) ? (cxText - avail) : 0;
 	pState->nScrollPos = max( 0, min( pState->nScrollPos, nOverflow ) );
@@ -131,8 +205,8 @@ static int GetMaxOutputScroll(HWND hWnd, PWPGOutputState pState) {
 
 	RECT rc = { 0 };
 	GetClientRect( hWnd, &rc );
-	const int avail = max( 1, (rc.right - rc.left) - (2 * WPG_OUTPUT_PADDING) );
-	const int cxText = MeasureOutputText( hWnd, pState );
+	const int avail = max( 1, rc.right - rc.left );
+	const int cxText = pState->sizeBitmap.cx;
 	return (cxText > avail) ? (cxText - avail) : 0;
 }
 
@@ -179,12 +253,35 @@ static BOOL SetOutputText(PWPGOutputState pState, PWPG_BUFFER pWpgBuffer) {
 		pState->cbBuffer = cbBuffer;
 	}
 
-	// Copy
+	// Copy and lock
 	CopyMemory( pState->pBuffer, pWpgBuffer, cb );
-	return TRUE; // TODO Protect..
+	pState->cch = pWpgBuffer->cch;
+	return CryptProtectMemory( pState->pBuffer, static_cast<DWORD>( pState->cbBuffer ), c_dwCryptProtectMemoryFlags );
 }
 
-// Paints the window, drawing through an off-screen buffer so scrolling doesn't flicker
+static size_t UnlockGetOutputText(PWPGOutputState pState, LPTSTR pszBuffer, size_t cchBuffer) {
+
+	// Look for an early out
+	if (pState->cch < 1 || pState->pBuffer == NULL){
+		return 0;
+	}
+
+	if (CryptUnprotectMemory( pState->pBuffer, static_cast<DWORD>( pState->cbBuffer ), c_dwCryptProtectMemoryFlags )){
+		const auto pWpgBuffer = reinterpret_cast<PWPG_BUFFER>( pState->pBuffer );
+
+		const auto cch = min( cchBuffer - 1, pWpgBuffer->cch );
+		for (size_t n = 0; n < cch; ++n){
+			pszBuffer[n] = pWpgBuffer->szBuf[n];
+		}
+		pszBuffer[cch] = TEXT( '\0' );
+
+		CryptProtectMemory( pState->pBuffer, static_cast<DWORD>( pState->cbBuffer ), c_dwCryptProtectMemoryFlags );
+		return cch;
+	}
+	return 0;
+}
+
+// Paints the window by blitting the cached output bitmap at the current scroll position
 static VOID PaintOutput(HWND hWnd, PWPGOutputState pState) {
 
 	PAINTSTRUCT ps = { 0 };
@@ -195,60 +292,18 @@ static VOID PaintOutput(HWND hWnd, PWPGOutputState pState) {
 
 	RECT rc = { 0 };
 	GetClientRect( hWnd, &rc );
-	const int cxClient = rc.right - rc.left;
-	const int cyClient = rc.bottom - rc.top;
-
-	// Everything is drawn into a back buffer and blitted to avoid flicker
-	const HDC hdcMem = CreateCompatibleDC( hdc );
-	const HBITMAP hbmMem = hdcMem ? CreateCompatibleBitmap( hdc, cxClient, cyClient ) : NULL;
-	const HDC hdcTarget = hbmMem ? hdcMem : hdc;
-	const HGDIOBJ hbmPrev = hbmMem ? SelectObject( hdcMem, hbmMem ) : NULL;
-
-	// Paint white so the control and its scroll bar read as one surface, distinct from the window chrome
-	FillRect( hdcTarget, &rc, reinterpret_cast<HBRUSH>( GetStockObject( WHITE_BRUSH ) ) );
-
-	const auto pWpgBuffer = reinterpret_cast<PWPG_BUFFER>( pState->pBuffer );
-	if ((pWpgBuffer) && (pWpgBuffer->cch > 0)){
-		if (!pState->hFont){
-			pState->hFont = CreateOutputFont( hdcTarget );
+	if (pState->hBitmap){
+		const HDC hdcMem = CreateCompatibleDC( hdc );
+		if (hdcMem){
+			const int cxClient = rc.right - rc.left;
+			const int cyClient = rc.bottom - rc.top;
+			const HGDIOBJ hbmPrev = SelectObject( hdcMem, pState->hBitmap );
+			BitBlt( hdc, 0, 0, cxClient, cyClient, hdcMem, pState->nScrollPos, 0, SRCCOPY );
+			SelectObject( hdcMem, hbmPrev );
+			DeleteDC( hdcMem );
 		}
-
-		if (pState->hFont){
-			const HGDIOBJ hPrev = SelectObject( hdcTarget, pState->hFont );
-			const int nBkMode = SetBkMode( hdcTarget, TRANSPARENT );
-			const COLORREF crText = SetTextColor( hdcTarget, RGB( 0, 0, 0 ) );
-
-			RECT rcContent = rc;
-			rcContent.left += WPG_OUTPUT_PADDING;
-			rcContent.right -= WPG_OUTPUT_PADDING;
-			const int avail = max( 1, rcContent.right - rcContent.left );
-
-			SIZE size = { 0 };
-			const auto cchText = static_cast<int>( pWpgBuffer->cch );
-			GetTextExtentPoint32( hdcTarget, pWpgBuffer->szBuf, cchText, &size );
-			if (size.cx <= avail){
-				// The text fits, so keep it centred within the control
-				DrawText( hdcTarget, pWpgBuffer->szBuf, cchText, &rcContent, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX );
-			}else{
-				// The text overflows: fall back to the locale's natural alignment and offset by the scroll position
-				RECT rcText = rcContent;
-				rcText.left = (rcContent.left - pState->nScrollPos);
-				DrawText( hdcTarget, pWpgBuffer->szBuf, cchText, &rcText, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX );
-			}
-
-			SetTextColor( hdcTarget, crText );
-			SetBkMode( hdcTarget, nBkMode );
-			SelectObject( hdcTarget, hPrev );
-		}
-	}
-
-	if (hbmMem){
-		BitBlt( hdc, 0, 0, cxClient, cyClient, hdcMem, 0, 0, SRCCOPY );
-		SelectObject( hdcMem, hbmPrev );
-		DeleteObject( hbmMem );
-	}
-	if (hdcMem){
-		DeleteDC( hdcMem );
+	}else{
+		FillRect( hdc, &rc, reinterpret_cast<HBRUSH>( GetStockObject( WHITE_BRUSH ) ) );
 	}
 	EndPaint( hWnd, &ps );
 }
@@ -256,6 +311,7 @@ static VOID PaintOutput(HWND hWnd, PWPGOutputState pState) {
 static void CleanupState(PWPGOutputState pState) {
 
 	if (pState){
+		DiscardOutputBitmap( pState );
 		DiscardOutputFont( pState );
 		if (pState->pBuffer){
 			SecureZeroMemory( pState->pBuffer, pState->cbBuffer );
@@ -281,29 +337,17 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 			break;
 
 		case WM_GETTEXTLENGTH:
-			if (pState){
-				const auto pWpgBuffer = reinterpret_cast<PWPG_BUFFER>( pState->pBuffer );
-				return pWpgBuffer->cch;
-			}
-			return 0;
+			return (pState) ? (pState->cch) : 0;
 
 		case WM_GETTEXT:
 			if (pState && wParam){
-				const auto pWpgBuffer = reinterpret_cast<PWPG_BUFFER>( pState->pBuffer );
-
-				LPTSTR pszBuffer = reinterpret_cast<LPTSTR>( lParam );
-				const auto cch = min( static_cast<size_t>( wParam ) - 1, pWpgBuffer->cch );
-				for (size_t n = 0; n < cch; ++n){
-					pszBuffer[n] = pWpgBuffer->szBuf[n];
-				}
-				pszBuffer[cch] = TEXT( '\0' );
-				return cch;
+				return UnlockGetOutputText( pState, reinterpret_cast<LPTSTR>( lParam ), static_cast<size_t>( wParam ));
 			}
 			return 0;
 
 		case WM_SIZE:
 			if (pState){
-				// The font is fixed; only the scroll extent depends on the available width
+				UnlockRenderOutputBitmap( hWnd, pState );
 				UpdateOutputScroll( hWnd, pState );
 				InvalidateRect( hWnd, NULL, FALSE );
 			}
@@ -393,13 +437,14 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 		case AWM_WPG_GENERATED:
 			if (pState){
 				const BOOL bSet = SetOutputText( pState, reinterpret_cast<PWPG_BUFFER>( wParam ) );
-				if (bSet){
+				const BOOL bRendered = bSet && UnlockRenderOutputBitmap( hWnd, pState );
+				if (bRendered){
 					// The font is fixed, so only the scroll extent needs to be recomputed
 					pState->nScrollPos = 0;
 					UpdateOutputScroll( hWnd, pState );
 					InvalidateRect( hWnd, NULL, FALSE );
 				}
-				return bSet;
+				return bRendered;
 			}
 			return FALSE;
 

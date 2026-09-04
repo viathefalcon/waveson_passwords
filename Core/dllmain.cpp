@@ -1,5 +1,8 @@
 // dllmain.cpp : Defines the entry point for the DLL.
 //
+// Waveson Password Generator
+// Author: Stephen Higgins, https://github.com/viathefalcon
+//
 
 // Includes
 //
