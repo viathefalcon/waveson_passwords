@@ -25,8 +25,6 @@ typedef struct _UIState {
 	WPGCaps wpgCaps;
 	XORVex wpgVex;
 
-	BOOL fClipboardOpen;
-
 	DWORD dwTooltips;
 	HWND* phTooltips;
 

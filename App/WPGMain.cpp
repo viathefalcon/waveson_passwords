@@ -37,12 +37,8 @@
 // Identifies the termination timer
 const UINT c_uTerminationTimer = 123U;
 
-// Identifies the clipboard timer
-const UINT c_uClipboardTimer = 321U;
-
 // Specifies the intervals for the timers
 const UINT c_uTerminationTimerElapseMinimum = 1U;
-const UINT c_uClipboardTimerElapse = 3000U;
 
 // Specifies the minimum, maximum and default lengths of generated passwords
 const BYTE c_cchMinLength = 0x01;
@@ -87,9 +83,6 @@ HRESULT OnGeneratorFailed(HWND, WPARAM, LPARAM);
 
 // Called when the main dialog is closed
 HRESULT OnClose(HWND);
-
-// Called when the timer for the clipboard fires
-HRESULT OnClipboardTimerElapsed(HWND);
 
 // Called when the generator thread has started
 HRESULT OnGeneratorStarted(HWND, WPARAM, LPARAM);
@@ -303,10 +296,6 @@ INT_PTR CALLBACK MainDialogProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPar
 
 					// Kill the dialog
 					EndDialog( hDlg, TRUE );
-					break;
-
-				case c_uClipboardTimer:
-					bResult = SUCCEEDED( OnClipboardTimerElapsed( hDlg ) );
 					break;
 
 				default:
@@ -551,56 +540,49 @@ HRESULT OnCopy(HWND hDlg) {
 	SecureZeroMemory( pszShared, cbOutput );
 	GetWindowText( hOutput, pszShared, cchOutput );
 
-	// Open the clipboard, if it isn't already
-	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
-	BOOL bOpened = uiStatePtr->fClipboardOpen;
+	// Open the clipboard
+	BOOL bOpened = OpenClipboard( hDlg );
 	if (!bOpened){
-		bOpened = OpenClipboard( hDlg );
-	}
-	if (bOpened){
-		// Set/renew the timer
-		SetTimer( hDlg, c_uClipboardTimer, c_uClipboardTimerElapse, NULL );
-	}
-	uiStatePtr->fClipboardOpen = bOpened;
-
-	// Put the text on the clipboard
-	HRESULT hResult = E_FAIL;
-	GlobalUnlock( hGlobal );
-	if (bOpened){
-		EmptyClipboard( );
-#if defined (UNICODE)
-		const UINT uFormat = CF_UNICODETEXT;
-#else
-		const UINT uFormat = CF_TEXT;
-#endif
-		HANDLE hHandle = SetClipboardData( uFormat, hGlobal );
-		if (hHandle){
-			hResult = S_OK;
-
-			// The clipboard now owns the memory?
-			hGlobal = NULL;
-		}else{
-#if defined (_DEBUG)
-			OutputDebugString( TEXT( "Copy failed? " ) );
-
-			TCHAR szDebug[MAX_PATH] = { 0 };
-			StringCchPrintf( szDebug, MAX_PATH, TEXT( "(%u)\x0A" ), GetLastError( ) );
-			OutputDebugString( szDebug );
-#endif
-			hResult = HRESULT_FROM_WIN32( GetLastError( ) );
-		}
-	}else{
 		const DWORD dwLastError = GetLastError( );
 		TCHAR szBuf[MAX_PATH] = { 0 };
 		StringCchPrintf( szBuf, MAX_PATH, TEXT( "Failed to open clipboard with error %X" ), dwLastError );
 		MessageBox( HWND_DESKTOP, szBuf, TEXT( "Error" ), MB_OK | MB_ICONERROR );
 
-		// Set the result
-		hResult = HRESULT_FROM_WIN32( dwLastError );
+		// Bail
+		return HRESULT_FROM_WIN32( dwLastError );
 	}
+
+	// Put the text on the clipboard
+	HRESULT hResult = E_FAIL;
+	GlobalUnlock( hGlobal );
+	EmptyClipboard( );
+#if defined (UNICODE)
+	const UINT uFormat = CF_UNICODETEXT;
+#else
+	const UINT uFormat = CF_TEXT;
+#endif
+	HANDLE hHandle = SetClipboardData( uFormat, hGlobal );
+	if (hHandle){
+		hResult = S_OK;
+
+		// The clipboard now owns the memory?
+		hGlobal = NULL;
+	}else{
+#if defined (_DEBUG)
+		OutputDebugString( TEXT( "Copy failed? " ) );
+
+		TCHAR szDebug[MAX_PATH] = { 0 };
+		StringCchPrintf( szDebug, MAX_PATH, TEXT( "(%u)\x0A" ), GetLastError( ) );
+		OutputDebugString( szDebug );
+#endif
+		hResult = HRESULT_FROM_WIN32( GetLastError( ) );
+	}
+
+	// Cleanup, get out
 	if (hGlobal){
 		GlobalFree( hGlobal );
 	}
+	CloseClipboard();
 	return hResult;
 }
 
@@ -706,17 +688,6 @@ HRESULT OnEnableDuplicatesChanged(HWND hDlg) {
 	return S_OK;
 }
 
-HRESULT OnClipboardTimerElapsed(HWND hDlg) {
-
-	// Kill the timer and close the clipboard
-	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
-	if (uiStatePtr->fClipboardOpen){
-		KillTimer( hDlg, c_uClipboardTimer );
-		uiStatePtr->fClipboardOpen = !CloseClipboard( );
-	}
-	return S_OK;
-}
-
 HRESULT OnGeneratorStarted(HWND hDlg, WPARAM wParam, LPARAM lParam) {
 
 	OutputDebugString( TEXT( "AWM_WPG_STARTED\x0D" ) );
@@ -771,9 +742,6 @@ HRESULT OnGeneratorStarted(HWND hDlg, WPARAM wParam, LPARAM lParam) {
 HRESULT OnGeneratorStopped(HWND hDlg) {
 
 	OutputDebugString( TEXT( "AWM_WPG_STOPPED\x0D" ) );
-
-	// Don't need the clipboard anymore
-	OnClipboardTimerElapsed( hDlg );
 
 	// Record the UI state
 	HKEY hKey = NULL;
