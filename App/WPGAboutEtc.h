@@ -30,6 +30,8 @@ typedef struct _UIState {
 	DWORD dwTooltips;
 	HWND* phTooltips;
 
+	HFONT hHotKeyStatusFont;
+
 	WPG_H wpgHandle;
 
 } UIState, *UIStatePtr;

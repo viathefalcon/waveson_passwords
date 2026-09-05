@@ -26,6 +26,12 @@
 // The fixed font size, in points; scaled for the device DPI at render time
 #define WPG_OUTPUT_FONT_POINTS	16
 
+// The hot key identifier
+#define WPG_HOTKEY_ID			4321
+
+// The hot key character code ('w')
+#define WPG_HOTKEY_VK_CODE		0x57
+
 // Types
 //
 
@@ -40,6 +46,7 @@ typedef struct _WPGOutputState {
 	int nDragAnchorX;	// The client x-coordinate at which the drag began, in pixels
 	int nDragAnchorPos;	// The scroll offset at which the drag began, in pixels
 	size_t cch;			// Gives the number of characters held in the internal buffer
+	int hotkeyId;		// Gives the id of the registered hotkey, or 0 if none registered
 
 	// Gives the state's internal buffer
 	SIZE_T cbBuffer;
@@ -141,9 +148,10 @@ static BOOL RenderOutputBitmap(HWND hWnd, PWPGOutputState pState) {
 
 	const HGDIOBJ hbmPrev = SelectObject( hdcMem, hBitmap );
 	RECT rcBitmap = { 0, 0, cxBitmap, cyClient };
-	FillRect( hdcMem, &rcBitmap, reinterpret_cast<HBRUSH>( GetStockObject( WHITE_BRUSH ) ) );
+	FillRect( hdcMem, &rcBitmap, GetSysColorBrush( COLOR_WINDOW ) );
 	const HGDIOBJ hFontPrev = SelectObject( hdcMem, pState->hFont );
 	SetBkMode( hdcMem, TRANSPARENT );
+	SetTextColor( hdcMem, GetSysColor( COLOR_WINDOWTEXT ) );
 	const int x = (cxBitmap == cxClient) ? ((cxClient - size.cx) / 2) : WPG_OUTPUT_PADDING;
 	const int y = (cyClient - size.cy) / 2;
 	TextOut( hdcMem, x, y, pWpgBuffer->szBuf, static_cast<int>( pWpgBuffer->cch ) );
@@ -303,14 +311,85 @@ static VOID PaintOutput(HWND hWnd, PWPGOutputState pState) {
 			DeleteDC( hdcMem );
 		}
 	}else{
-		FillRect( hdc, &rc, reinterpret_cast<HBRUSH>( GetStockObject( WHITE_BRUSH ) ) );
+		FillRect( hdc, &rc, GetSysColorBrush( COLOR_WINDOW ) );
 	}
 	EndPaint( hWnd, &ps );
 }
 
-static void CleanupState(PWPGOutputState pState) {
+static BOOL HotKeyPressed(PWPGOutputState pState, WPARAM wParam, LPARAM lParam) {
 
+	if (wParam == WPG_HOTKEY_ID){
+#if defined (_DEBUG)
+		OutputDebugString( TEXT( "Hotkey pressed.\x0a" ) );
+#endif
+
+		if (pState->cch > 0){
+			// Allocate the input array
+			const auto inputCount = static_cast<UINT>(2 * pState->cch);
+			const auto cbInputs = sizeof( INPUT ) * inputCount;
+			auto inputs = static_cast<PINPUT>( PH_ALLOC( cbInputs ) );
+
+			// Unlock the buffer and fill the array
+			if (CryptUnprotectMemory( pState->pBuffer, static_cast<DWORD>( pState->cbBuffer ), c_dwCryptProtectMemoryFlags )){
+				const auto pWpgBuffer = reinterpret_cast<PWPG_BUFFER>( pState->pBuffer );
+
+				auto ptr = inputs;
+				for (size_t n = 0; n < pState->cch; ++n) {
+					// Populate the input
+					INPUT input = { 0 };
+					input.type = INPUT_KEYBOARD;
+					input.ki.wScan = pWpgBuffer->szBuf[n];
+					input.ki.dwFlags = KEYEVENTF_UNICODE;
+
+					// Key down
+					CopyMemory( ptr, &input, sizeof( INPUT ) );
+					++ptr;
+
+					// Key up
+					input.ki.dwFlags |= KEYEVENTF_KEYUP;
+					CopyMemory( ptr, &input, sizeof( INPUT ) );
+					++ptr;
+				}
+
+				CryptProtectMemory( pState->pBuffer, static_cast<DWORD>( pState->cbBuffer ), c_dwCryptProtectMemoryFlags );
+
+				// Send it
+				auto sent = SendInput( inputCount, inputs, sizeof( INPUT ) );
+#if defined (_DEBUG)
+				if (sent == inputCount){
+					TCHAR szBuf[128] = { 0 };
+					StringCchPrintf( szBuf, _countof( szBuf ), TEXT( "Sent %u inputs \x0A" ), inputCount );
+					OutputDebugString( szBuf );
+				}else{
+					TCHAR szBuf[128] = { 0 };
+					StringCchPrintf( szBuf, _countof( szBuf ), TEXT( "Failed to send %u inputs with error %u (%u)\x0A" ), inputCount, GetLastError( ), sent );
+					OutputDebugString( szBuf );
+				}
+#endif
+			}
+
+			// Cleanup prior to returning
+			SecureZeroMemory( inputs, cbInputs );
+			PH_FREE( inputs );
+		}
+
+		return TRUE;
+	}
+
+#if defined (_DEBUG)
+	OutputDebugString( TEXT( "Unrecognised hotkey pressed.\x0a" ) );
+#endif
+	return FALSE;
+}
+
+static void CleanupState(HWND hWnd) {
+
+	PWPGOutputState pState = GetWPGOutputState( hWnd );
 	if (pState){
+		if (pState->hotkeyId){
+			UnregisterHotKey( hWnd, pState->hotkeyId );
+		}
+
 		DiscardOutputBitmap( pState );
 		DiscardOutputFont( pState );
 		if (pState->pBuffer){
@@ -319,6 +398,75 @@ static void CleanupState(PWPGOutputState pState) {
 		}
 		PH_FREE( pState );
 	}
+	SetWindowLongPtr( hWnd, 0, 0 );
+}
+
+static BOOL InitState(HWND hWnd) {
+
+	// Allocate, set the state
+	auto pState = reinterpret_cast<PWPGOutputState>( PH_ALLOC( sizeof( WPGOutputState ) ) );
+	if (!pState){
+		return FALSE;
+	}
+	SetWindowLongPtr( hWnd, 0, reinterpret_cast<LONG_PTR>( pState ) );
+
+	if (RegisterHotKey( hWnd, WPG_HOTKEY_ID, MOD_ALT | MOD_SHIFT | MOD_CONTROL, WPG_HOTKEY_VK_CODE )){
+		pState->hotkeyId = WPG_HOTKEY_ID;
+	}
+
+#if defined (_DEBUG)
+	if (pState->hotkeyId == WPG_HOTKEY_ID){
+		OutputDebugString( TEXT( "Registered hotkey\x0A" ) );
+	}else{
+		OutputDebugString( TEXT( "Failed to register hotkey\x0a" ) );
+	}
+#endif
+	return TRUE;
+}
+
+static LRESULT GetHotKeyString(PWPGOutputState pState, LPTSTR pszBuffer, size_t cchBuffer) {
+
+	// Look for an early out
+	if (pState->hotkeyId == 0){
+		return 0;
+	}
+
+	BYTE ks[256] = {};
+	if (!GetKeyboardState( ks )){
+		return 0;
+	}
+
+	// Convert the virtual key code to a character (or characters..?)
+	TCHAR szBuf[16] = { 0 };
+	auto translated = ToUnicodeEx(
+		WPG_HOTKEY_VK_CODE,
+		MapVirtualKey( WPG_HOTKEY_VK_CODE, MAPVK_VK_TO_VSC ),
+		ks,
+		szBuf,
+		_countof( szBuf ),
+		0,
+		GetKeyboardLayout( 0 )
+	);
+	if (translated < 1) {
+		// Can't use
+		return 0;
+	}
+
+	// Format and emit the string
+	szBuf[translated] = 0;
+	auto hr = StringCchPrintf( pszBuffer, cchBuffer, TEXT( "Ctrl + Shift + Alt + %s" ), szBuf );
+	if (FAILED( hr )){
+		return 0;
+	}
+
+	// Get the length
+	size_t cch;
+	hr = StringCchLength( pszBuffer, cchBuffer, &cch );
+	if (FAILED( hr )){
+		return 0;
+	}
+
+	return static_cast<LRESULT>( cch );
 }
 
 // Handles messages sent to windows of the "WPGOutput" class
@@ -327,12 +475,8 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 	PWPGOutputState pState = GetWPGOutputState( hWnd );
 	switch (uMsg){
 		case WM_NCCREATE:
-			{
-				pState = reinterpret_cast<PWPGOutputState>( PH_ALLOC( sizeof( WPGOutputState ) ) );
-				if (!pState){
-					return FALSE;
-				}
-				SetWindowLongPtr( hWnd, 0, reinterpret_cast<LONG_PTR>( pState ) );
+			if (!InitState( hWnd )){
+				return FALSE;
 			}
 			break;
 
@@ -341,7 +485,7 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
 		case WM_GETTEXT:
 			if (pState && wParam){
-				return UnlockGetOutputText( pState, reinterpret_cast<LPTSTR>( lParam ), static_cast<size_t>( wParam ));
+				return UnlockGetOutputText( pState, reinterpret_cast<LPTSTR>( lParam ), static_cast<size_t>( wParam ) );
 			}
 			return 0;
 
@@ -429,9 +573,14 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 			}
 			break;
 
+		case WM_HOTKEY:
+			if (HotKeyPressed( pState, wParam, lParam )){
+				return 0;
+			}
+			break;
+
 		case WM_NCDESTROY:
-			CleanupState( pState );
-            SetWindowLongPtr( hWnd, 0, 0 );
+			CleanupState( hWnd );
 			break;
 
 		case AWM_WPG_GENERATED:
@@ -447,6 +596,9 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 				return bRendered;
 			}
 			return FALSE;
+
+		case AWM_WPG_GET_HOTKEY_STR:
+			return GetHotKeyString( pState, reinterpret_cast<LPTSTR>( lParam ), static_cast<size_t>( wParam ) );
 
 		default:
 			break;

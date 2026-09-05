@@ -466,10 +466,63 @@ HRESULT OnInitDialog(HWND hDlg) {
 		OnReset( hDlg );
 	}
 
+	// Get and display the hot key status
+	HWND hStatus = GetDlgItem( hDlg, IDC_HOTKEY_STATUS );
+	{
+		constexpr unsigned cchBuf = 128;
+		TCHAR szBuf[cchBuf] = { 0 };
+		auto hotkeyStatusLen = SendMessage(
+			GetDlgItem( hDlg, IDC_OUTPUT ),
+			AWM_WPG_GET_HOTKEY_STR,
+			static_cast<WPARAM>( cchBuf ),
+			reinterpret_cast<LPARAM>( szBuf ) );
+		auto hInstance = reinterpret_cast<HINSTANCE>( GetWindowLongPtr( hDlg, GWLP_HINSTANCE) );
+		if (hotkeyStatusLen){
+			auto pszFmt = LoadStringProcessHeap( hInstance, IDS_HOTKEY_STATUS_FMT );
+		
+			// Allocate the buffer and format the string
+			size_t cch = 0;
+			StringCchLength( pszFmt, STRSAFE_MAX_CCH, &cch );
+			cch += cchBuf;
+			auto pszStr = static_cast<LPTSTR>( PH_ALLOC( (sizeof( WCHAR ) * cch) + 1 ) );
+			StringCchPrintf( pszStr, cch, pszFmt, szBuf );
+
+			// Apply, cleanup
+			SetWindowText( hStatus, pszStr );
+			PH_FREE( pszStr );
+			PH_FREE( pszFmt );
+		}else{
+			auto pszStr = LoadStringProcessHeap( hInstance, IDS_HOTKEY_UNAVAILABLE );
+			SetWindowText( hStatus, pszStr );
+			PH_FREE( pszStr );
+		}
+	}
+
 	// Initialise the UI state
 	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( PH_ALLOC( sizeof( UIState ) ) );
 	uiStatePtr->wpgHandle = wpgHandle;
 	SetWindowLongPtr( hDlg, GWLP_USERDATA, reinterpret_cast<LONG_PTR>( uiStatePtr ) );
+
+	// Update the font on the hot key status label
+	{
+		HFONT hNormalFont =
+			reinterpret_cast<HFONT>( SendMessage( hStatus, WM_GETFONT, 0, 0 ) );
+
+		LOGFONT logFont = { 0 };
+		GetObject( hNormalFont, sizeof( logFont ), &logFont );
+		logFont.lfWeight = FW_BOLD;
+
+		HFONT hBoldFont = CreateFontIndirect( &logFont );
+		if (hBoldFont){
+			SendMessage(
+				hStatus,
+				WM_SETFONT,
+				reinterpret_cast<WPARAM>( hBoldFont ),
+				TRUE); // redraw
+			uiStatePtr->hHotKeyStatusFont = hNormalFont;
+		}
+	}
+
 	return OnCreateTooltips( hDlg );
 }
 
@@ -599,6 +652,13 @@ HRESULT OnGeneratorFailed(HWND hDlg, WPARAM wParam, LPARAM lParam) {
 HRESULT OnClose(HWND hDlg) {
 
 	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( GetWindowLongPtr( hDlg, GWLP_USERDATA ) );
+	if (uiStatePtr->hHotKeyStatusFont){
+		// Restore the normal font for the hot key status label
+		HWND hStatus = GetDlgItem( hDlg, IDC_HOTKEY_STATUS );
+		HFONT hBoldFont = reinterpret_cast<HFONT>( SendMessage( hStatus, WM_GETFONT, 0, 0 ) );
+		SendMessage( hStatus, WM_SETFONT, reinterpret_cast<WPARAM>( uiStatePtr->hHotKeyStatusFont ), FALSE) ;
+		DeleteObject(hBoldFont);
+	}
 	WPG_H wpgHandle = (uiStatePtr) ? uiStatePtr->wpgHandle : NULL;
 	if (wpgHandle){
 		StopWPGGenerator( wpgHandle );

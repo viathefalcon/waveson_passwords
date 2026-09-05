@@ -19,17 +19,17 @@
 // Functions
 //
 
-LPWSTR LoadStringProcessHeap(HINSTANCE hInstance, UINT uID) {
+LPTSTR LoadStringProcessHeap(HINSTANCE hInstance, UINT uID) {
 
-	LPWSTR pszTmp = NULL;
-	const int nLength = LoadStringW( hInstance, uID, reinterpret_cast<LPWSTR>( &pszTmp ), 0 ); // On its own, this just returns a pointer to the entire contents of the string table..?
+	LPTSTR pszTmp = NULL;
+	const int nLength = LoadString( hInstance, uID, reinterpret_cast<LPTSTR>( &pszTmp ), 0 ); // On its own, this just returns a pointer to the entire contents of the string table..?
 	if (!nLength){
 		return NULL;
 	}
 
 	// Allocate a null-terminated buffer and copy into it
-	LPWSTR pszText = static_cast<LPWSTR>( PH_ALLOC( sizeof( WCHAR ) * (nLength+1) ) );
-	StringCchCopyW( pszText, (nLength + 1), pszTmp );
+	LPTSTR pszText = static_cast<LPTSTR>( PH_ALLOC( sizeof( TCHAR ) * (nLength+1) ) );
+	StringCchCopy( pszText, (nLength + 1), pszTmp );
 	return pszText;
 }
 
