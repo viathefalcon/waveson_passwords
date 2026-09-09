@@ -222,15 +222,22 @@ DWORD WINAPI WPGGeneratorThreadProc(__in LPVOID lpParameter) {
 	SecureZeroMemory( pThreadProps->pWpgBuffer, cbBuffer );
 	pThreadProps->wpg = wpg_t::New( );
 
-	// Create the message window
+	// Register, create the message window
 	const auto hInstance = GetCoreInstance( );
 	HWND hWnd = NULL;
-	WNDCLASSEX wcx = { 0 };
-	wcx.cbSize = sizeof( WNDCLASSEX );
-	wcx.lpfnWndProc = WPGGeneratorWindowProcedure;
-	wcx.hInstance = hInstance;
-	wcx.lpszClassName = c_pszWindowClass;
-	if (RegisterClassEx( &wcx )){
+	WNDCLASSEX wcex = { 0 };
+	wcex.cbSize = sizeof( WNDCLASSEX );
+	auto bRegistered = GetClassInfoEx( hInstance, c_pszWindowClass, &wcex );
+	if (bRegistered){
+		// Already registered, probably from a prior run
+		;
+	}else{
+		wcex.lpfnWndProc = WPGGeneratorWindowProcedure;
+		wcex.hInstance = hInstance;
+		wcex.lpszClassName = c_pszWindowClass;
+		bRegistered = RegisterClassEx( &wcex );
+	}
+	if (bRegistered){
 		hWnd = CreateWindowEx(
 			0,
 			c_pszWindowClass,

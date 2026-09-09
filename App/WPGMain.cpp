@@ -455,6 +455,11 @@ HRESULT OnInitDialog(HWND hDlg) {
 		OnReset( hDlg );
 	}
 
+	// Initialise the UI state
+	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( PH_ALLOC( sizeof( UIState ) ) );
+	uiStatePtr->wpgHandle = wpgHandle;
+	SetWindowLongPtr( hDlg, GWLP_USERDATA, reinterpret_cast<LONG_PTR>( uiStatePtr ) );
+
 	// Get and display the hot key status
 	HWND hStatus = GetDlgItem( hDlg, IDC_HOTKEY_STATUS );
 	{
@@ -480,35 +485,27 @@ HRESULT OnInitDialog(HWND hDlg) {
 			SetWindowText( hStatus, pszStr );
 			PH_FREE( pszStr );
 			PH_FREE( pszFmt );
+
+			// Update the font 
+			HFONT hNormalFont =
+				reinterpret_cast<HFONT>( SendMessage( hStatus, WM_GETFONT, 0, 0 ) );
+
+			LOGFONT logFont = { 0 };
+			GetObject( hNormalFont, sizeof( logFont ), &logFont );
+			logFont.lfWeight = FW_BOLD;
+
+			HFONT hBoldFont = CreateFontIndirect( &logFont );
+			if (hBoldFont){
+				SendMessage(
+					hStatus,
+					WM_SETFONT,
+					reinterpret_cast<WPARAM>( hBoldFont ),
+					TRUE); // redraw
+				uiStatePtr->hHotKeyStatusFont = hNormalFont;
+			}
 		}else{
-			auto pszStr = LoadStringProcessHeap( hInstance, IDS_HOTKEY_UNAVAILABLE );
-			SetWindowText( hStatus, pszStr );
-			PH_FREE( pszStr );
-		}
-	}
-
-	// Initialise the UI state
-	UIStatePtr uiStatePtr = reinterpret_cast<UIStatePtr>( PH_ALLOC( sizeof( UIState ) ) );
-	uiStatePtr->wpgHandle = wpgHandle;
-	SetWindowLongPtr( hDlg, GWLP_USERDATA, reinterpret_cast<LONG_PTR>( uiStatePtr ) );
-
-	// Update the font on the hot key status label
-	{
-		HFONT hNormalFont =
-			reinterpret_cast<HFONT>( SendMessage( hStatus, WM_GETFONT, 0, 0 ) );
-
-		LOGFONT logFont = { 0 };
-		GetObject( hNormalFont, sizeof( logFont ), &logFont );
-		logFont.lfWeight = FW_BOLD;
-
-		HFONT hBoldFont = CreateFontIndirect( &logFont );
-		if (hBoldFont){
-			SendMessage(
-				hStatus,
-				WM_SETFONT,
-				reinterpret_cast<WPARAM>( hBoldFont ),
-				TRUE); // redraw
-			uiStatePtr->hHotKeyStatusFont = hNormalFont;
+			// Just hide the window
+			ShowWindow( hStatus, SW_HIDE );
 		}
 	}
 
@@ -730,7 +727,7 @@ HRESULT OnGeneratorStarted(HWND hDlg, WPARAM wParam, LPARAM lParam) {
 		(dwChecks & c_dwDuplicatesCheck) ? BST_CHECKED : BST_UNCHECKED
 	);
 
-	// If generated via RDRAND or TPM is available to us, enable the button
+	// If generated via RDRAND or TPM is available to us, enable the refresh button
 	const BOOL bEnable = (uCheckRDRAND == BST_CHECKED) || (uCheckTPM == BST_CHECKED);
 	EnableWindow( GetDlgItem( hDlg, IDC_BUTTON_REFRESH ), bEnable );
 
