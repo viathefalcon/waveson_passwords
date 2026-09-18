@@ -144,6 +144,7 @@ namespace UnitTests
 				WPGCapTest, 
 				&cchGenerated,
 				pszAlphabet,
+				cchAlphabet,
 				false );
 
 			// Assert
@@ -178,6 +179,7 @@ namespace UnitTests
 				cap, 
 				&cchGenerated,
 				pszAlphabet,
+				cchAlphabet,
 				false );
 
 			// Assert
@@ -204,6 +206,7 @@ namespace UnitTests
 				WPGCapNONE, 
 				&cchGenerated,
 				pszAlphabet,
+				cchAlphabet,
 				false );
 
 			// Assert
