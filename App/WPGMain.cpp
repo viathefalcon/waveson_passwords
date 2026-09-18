@@ -606,13 +606,12 @@ HRESULT OnRefresh(HWND hDlg) {
 		return S_OK;
 	}
 
-	// Allocate a buffer for the output
-	HWND hSlider = GetDlgItem( hDlg, IDC_SLIDER_OUTPUT );
-	BYTE cchPwd = static_cast<BYTE>( SendMessage( hSlider, TBM_GETPOS, 0, 0 ) );
-
-	// Send to the generator thread
+	// Signal the generator thread
 	WPG_H wpgHandle = (uiStatePtr) ? uiStatePtr->wpgHandle : NULL;
 	if (wpgHandle){
+		HWND hSlider = GetDlgItem( hDlg, IDC_SLIDER_OUTPUT );
+		BYTE cchPwd = static_cast<BYTE>( SendMessage( hSlider, TBM_GETPOS, 0, 0 ) );
+
 		WPGPwdGenAsync( wpgHandle, cchPwd, caps );
 		return S_OK;
 	}

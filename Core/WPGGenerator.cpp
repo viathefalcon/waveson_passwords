@@ -20,8 +20,7 @@
 // Macros
 //
 
-#define AWM_WPG_ALPHABET		(AWM_WPG_STOPPED+1)
-#define AWM_WPG_DUPLICATES		(AWM_WPG_ALPHABET+1)
+#define AWM_WPG_DUPLICATES		(AWM_WPG_STOPPED+1)
 #define AWM_WPG_GENERATE		(AWM_WPG_DUPLICATES+1)
 #define AWM_WPG_STOP			(AWM_WPG_GENERATE+1)
 
@@ -33,10 +32,20 @@ constexpr LONG WPG_NON_STOP = 0;
 // Types
 //
 
+typedef struct _WPG_SHARED  {
+
+	SRWLOCK lock;
+	size_t cbBuffer;
+	size_t cchBuffer;
+	LPTSTR pszBuffer;
+
+} WPG_SHARED, *PWPG_SHARED;
+
 typedef struct _WPG_INSTANCE {
 
 	HANDLE hThread;
 	DWORD dwThreadId;
+	WPG_SHARED wpgAlphabet;
 	LONG* plStop;
 
 } WPG_INSTANCE, *PWPG_INSTANCE;
@@ -46,14 +55,12 @@ typedef struct _WPG_THREAD_PROPS {
 	HWND hWndHost;
 	HWND hWndDest;
 	LONG* plStop;
+	PWPG_SHARED pWpgAlphabet;
 
 	BYTE cchMax;
 	PWPG_BUFFER pWpgBuffer;
 
 	std::shared_ptr<wpg_t> wpg;
-
-	BYTE cchAlphabet;
-	LPCTSTR pszAlphabet;
 
 	BOOL fDuplicatesAllowed;
 
@@ -80,24 +87,31 @@ LRESULT CALLBACK WPGGeneratorWindowProcedure(HWND, UINT, WPARAM, LPARAM);
 // Called when a new password is to be generated
 HRESULT OnGeneratePassword(HWND, WPARAM, LPARAM);
 
-// Called when the alphabet to use for password generation changes
-HRESULT OnSetPwdAlphabet(HWND, WPARAM, LPARAM);
-
 // Called when the 'allow duplicates' toggle is flipped
 HRESULT OnEnablePwdDuplicates(HWND, WPARAM, LPARAM);
 
 // Functions
 //
 
+static VOID InitWpgAlphabet(_In_ PWPG_INSTANCE pInstance) {
+
+	InitializeSRWLock( &(pInstance->wpgAlphabet.lock) );
+	pInstance->wpgAlphabet.cbBuffer = sizeof( TCHAR ) * 128;
+	pInstance->wpgAlphabet.pszBuffer = static_cast<LPTSTR>(
+		PH_ALLOC( pInstance->wpgAlphabet.cbBuffer )
+	);
+}
+
 WPG_H StartWPGGenerator(HWND hWndHost, HWND hWndDest, BYTE cchMax) {
 
 	// Allocate the structure
-	PWPG_INSTANCE pInstance = reinterpret_cast<PWPG_INSTANCE>(
+	PWPG_INSTANCE pInstance = static_cast<PWPG_INSTANCE>(
 		PH_ALLOC( sizeof( WPG_INSTANCE ) )
 	);
 	if (pInstance == NULL){
 		return NULL;
 	}
+	InitWpgAlphabet( pInstance );	
 	pInstance->plStop = reinterpret_cast<LONG*>( _aligned_malloc( sizeof( LONG ), alignof( LONG ) ) );
 	*(pInstance->plStop) = WPG_NON_STOP;
 
@@ -106,6 +120,7 @@ WPG_H StartWPGGenerator(HWND hWndHost, HWND hWndDest, BYTE cchMax) {
 		PH_ALLOC( sizeof( WPG_THREAD_PROPS ) )
 	);
 	pThreadProps->plStop = pInstance->plStop;
+	pThreadProps->pWpgAlphabet = &(pInstance->wpgAlphabet);
 	pThreadProps->hWndHost = hWndHost;
 	pThreadProps->hWndDest = hWndDest;
 	pThreadProps->cchMax = cchMax;
@@ -135,25 +150,48 @@ VOID WPGPwdGenAsync(__in WPG_H wpgHandle, __in BYTE cchLength, __in WPGCaps wpgC
 
 VOID SetPwdAlphabetAsync(__in WPG_H wpgHandle, __in LPCTSTR pszAlphabet, __in BYTE cchAlphabet) {
 
-	// Take a (null-terminated) copy of the alphabet
-	LPTSTR pszCopy = (cchAlphabet > 0)
-		? static_cast<LPTSTR>( PH_ALLOC( sizeof( TCHAR ) * (cchAlphabet + 1) ) )
-		: NULL;
-	if (pszCopy){
-		CopyMemory( pszCopy, pszAlphabet, sizeof( TCHAR ) * cchAlphabet );
-		pszCopy[cchAlphabet] = 0;
-	}
-
-	// Post it to the thread
+	// Copy
 	PWPG_INSTANCE pInstance = reinterpret_cast<PWPG_INSTANCE>(
 		wpgHandle
 	);
-	PostThreadMessage(
-		pInstance->dwThreadId,
-		AWM_WPG_ALPHABET,
-		reinterpret_cast<WPARAM>( pszCopy ),
-		static_cast<LPARAM>( cchAlphabet )
-	);
+	auto pWpgAlphabet = &(pInstance->wpgAlphabet);
+	PSRWLOCK pLock = &(pWpgAlphabet->lock);
+	AcquireSRWLockExclusive( pLock );
+
+	BOOL ok = TRUE;
+	const auto cbBuffer = sizeof( TCHAR ) * cchAlphabet;
+	if (cbBuffer > pWpgAlphabet->cbBuffer){
+		// Allocate a new buffer
+		auto pszBuffer = static_cast<LPTSTR>(
+			PH_ALLOC( cbBuffer )
+		);
+		if (pszBuffer){
+			// Release and replace the existing buffer
+			PH_FREE( pWpgAlphabet->pszBuffer );
+			pWpgAlphabet->cbBuffer = cbBuffer;
+			pWpgAlphabet->pszBuffer = pszBuffer;
+		}else{
+			ok = FALSE;
+		}
+	}else{
+		SecureZeroMemory( pWpgAlphabet->pszBuffer, pWpgAlphabet->cbBuffer );
+	}
+
+	if (ok){
+		CopyMemory( pWpgAlphabet->pszBuffer, pszAlphabet, cbBuffer );
+		pWpgAlphabet->cchBuffer = cchAlphabet;
+
+#if defined (_DEBUG)
+		OutputDebugString( TEXT( "Password alphabet set to: " ) );
+		if (cchAlphabet){
+			OutputDebugString( pszAlphabet );
+		}else{
+			OutputDebugString( TEXT( "(nothing - null - nada)" ) );
+		}
+		OutputDebugString( TEXT( "\x0A" ) );
+#endif
+	}
+	ReleaseSRWLockExclusive( pLock );
 }
 
 VOID EnablePwdDuplicatesAsync(__in WPG_H wpgHandle, __in BOOL fEnabled) {
@@ -195,6 +233,12 @@ VOID CleanupWPGGenerator(WPG_H wpgHandle) {
 	if (pInstance->hThread){
 		CloseHandle( pInstance->hThread );
 		pInstance->hThread = NULL;
+	}
+	if (pInstance->wpgAlphabet.pszBuffer){
+		PSRWLOCK pLock = &(pInstance->wpgAlphabet.lock);
+		AcquireSRWLockExclusive( pLock );
+		PH_FREE( pInstance->wpgAlphabet.pszBuffer );
+		ReleaseSRWLockExclusive( pLock );
 	}
 	PH_FREE( pInstance );
 }
@@ -289,10 +333,6 @@ DWORD WINAPI WPGGeneratorThreadProc(__in LPVOID lpParameter) {
 		_aligned_free( pThreadProps->pWpgBuffer );
 		pThreadProps->pWpgBuffer = NULL;
 	}
-	if (pThreadProps->pszAlphabet){
-		PH_FREE( const_cast<LPTSTR>( pThreadProps->pszAlphabet ) );
-		pThreadProps->pszAlphabet = NULL;
-	}
 	pThreadProps->plStop = NULL;
 	pThreadProps->wpg.reset( );
 	PH_FREE( lpParameter );
@@ -339,10 +379,6 @@ LRESULT CALLBACK WPGGeneratorWindowProcedure(HWND hWnd, UINT uMessage, WPARAM wP
 		}
 			break;
 
-		case AWM_WPG_ALPHABET:
-			OnSetPwdAlphabet( hWnd, wParam, lParam );
-			break;
-
 		case AWM_WPG_DUPLICATES:
 			OnEnablePwdDuplicates( hWnd, wParam, lParam );
 			break;
@@ -373,10 +409,14 @@ HRESULT OnGeneratePassword(HWND hWnd, WPARAM wParam, LPARAM lParam) {
 		GetWindowLongPtr( hWnd, GWLP_USERDATA )
 	);
 	if (pThreadProps && pThreadProps->wpg){
+		const auto pWpgAlphabet = pThreadProps->pWpgAlphabet;
+		PSRWLOCK pLock = &(pWpgAlphabet->lock);
+		AcquireSRWLockShared( pLock );
+
 		// Setup
 		const BYTE cchLength = static_cast<BYTE>( wParam );
 		const WPGCaps wpgCaps = static_cast<WPGCaps>( lParam );
-		const BOOL fEmpty = (pThreadProps->pszAlphabet == NULL) || (pThreadProps->cchAlphabet < 1);
+		const BOOL fEmpty = (pWpgAlphabet->pszBuffer == NULL) || (pWpgAlphabet->cchBuffer < 1);
 		BYTE cch = fEmpty ? 0 : min( cchLength, pThreadProps->cchMax );
 
 		// Do the password generation
@@ -386,9 +426,11 @@ HRESULT OnGeneratePassword(HWND hWnd, WPARAM wParam, LPARAM lParam) {
 			cch,
 			wpgCaps,
 			&(cch),
-			pThreadProps->pszAlphabet,
+			pWpgAlphabet->pszBuffer,
+			pWpgAlphabet->cchBuffer,
 			pThreadProps->fDuplicatesAllowed
 		);
+		ReleaseSRWLockShared( pLock );
 
 		if (wpgCapsFailed == WPGCapNONE){
 #if defined (_DEBUG)
@@ -428,34 +470,6 @@ HRESULT OnGeneratePassword(HWND hWnd, WPARAM wParam, LPARAM lParam) {
 		return S_OK;
 	}
 	return E_POINTER;
-}
-
-HRESULT OnSetPwdAlphabet(HWND hWnd, WPARAM wParam, LPARAM lParam) {
-
-	PWPG_THREAD_PROPS pThreadProps = reinterpret_cast<PWPG_THREAD_PROPS>(
-		GetWindowLongPtr( hWnd, GWLP_USERDATA )
-	);
-	if (pThreadProps){
-		// Release the existing alphabet, if any
-		if (pThreadProps->pszAlphabet){
-			PH_FREE( const_cast<LPTSTR>( pThreadProps->pszAlphabet ) );
-		}
-
-		// Just accept the pointer
-		pThreadProps->pszAlphabet = reinterpret_cast<LPTSTR>( wParam );
-		pThreadProps->cchAlphabet = static_cast<BYTE>( lParam );
-#if defined (_DEBUG)
-		OutputDebugString( TEXT( "Password alphabet set to: " ) );
-		if (pThreadProps->pszAlphabet){
-			OutputDebugString( pThreadProps->pszAlphabet );
-		}else{
-			OutputDebugString( TEXT( "(nothing - null - nada)" ) );
-		}
-		OutputDebugString( TEXT( "\x0A" ) );
-#endif
-		return S_OK;
-	}
-	return S_FALSE;
 }
 
 HRESULT OnEnablePwdDuplicates(HWND hWnd, WPARAM wParam, LPARAM lParam) {

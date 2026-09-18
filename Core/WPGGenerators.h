@@ -67,7 +67,8 @@ public:
 		__in BYTE cchBuffer,
 		__in WPGCaps,
 		__inout PBYTE,
-		__in_z LPCTSTR,
+		__in_ecount(cchAlphabet) LPCTSTR pszAlphabet,
+		__in size_t cchAlphabet,
 		__in BOOL);
 
 	// Return a token indicating the vector extensions being used by the generator

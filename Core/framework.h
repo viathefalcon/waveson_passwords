@@ -14,3 +14,6 @@
 
 // Data Protection API Headers
 #include <dpapi.h>
+
+// Synchronisation Headers
+#include <synchapi.h>

@@ -267,6 +267,7 @@ WPGCaps wpg_t::Generate(LPTSTR pszBuffer,
 						WPGCaps caps,
 						PBYTE cchLength,
 						LPCTSTR pszAlphabet,
+						size_t cchAlphabet,
 						BOOL fDuplicatesAllowed) {
 	// Look for an early out
 	if (caps == WPGCapNONE){
@@ -277,8 +278,6 @@ WPGCaps wpg_t::Generate(LPTSTR pszBuffer,
 	}
 
 	// Setup
-	size_t cchAlphabet = 0;
-	StringCchLength( pszAlphabet, STRSAFE_MAX_CCH, &cchAlphabet );
 	std::unique_ptr<empty_bitset_t> bitset = (fDuplicatesAllowed)
 		? std::make_unique<empty_bitset_t>( cchAlphabet )
 		: std::make_unique<bitset_t>( cchAlphabet );
