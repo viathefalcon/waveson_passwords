@@ -520,13 +520,24 @@ HRESULT OnReset(HWND hDlg) {
 		HWND hInput = GetDlgItem( hDlg, IDC_EDIT_INPUT );
 		SetWindowText( hInput, p );
 
-		HeapFree( GetProcessHeap( ), 0, p );
+		PH_FREE( p );
 		return S_OK;
 	}
 	return HRESULT_FROM_WIN32( GetLastError( ) );
 }
 
 HRESULT OnCopy(HWND hDlg) {
+
+	// Open the clipboard
+	if (!OpenClipboard( hDlg )){
+		const DWORD dwLastError = GetLastError( );
+		TCHAR szBuf[MAX_PATH] = { 0 };
+		StringCchPrintf( szBuf, MAX_PATH, TEXT( "Failed to open clipboard with error %X" ), dwLastError );
+		MessageBox( HWND_DESKTOP, szBuf, TEXT( "Error" ), MB_OK | MB_ICONERROR );
+
+		// Bail
+		return HRESULT_FROM_WIN32( dwLastError );
+	}
 
 	// Get a shareable copy of the contents of the output control
 	HWND hOutput = GetDlgItem( hDlg, IDC_OUTPUT );
@@ -537,41 +548,32 @@ HRESULT OnCopy(HWND hDlg) {
 	SecureZeroMemory( pszShared, cbOutput );
 	GetWindowText( hOutput, pszShared, cchOutput );
 
-	// Open the clipboard
-	BOOL bOpened = OpenClipboard( hDlg );
-	if (!bOpened){
-		const DWORD dwLastError = GetLastError( );
-		TCHAR szBuf[MAX_PATH] = { 0 };
-		StringCchPrintf( szBuf, MAX_PATH, TEXT( "Failed to open clipboard with error %X" ), dwLastError );
-		MessageBox( HWND_DESKTOP, szBuf, TEXT( "Error" ), MB_OK | MB_ICONERROR );
-
-		// Bail
-		return HRESULT_FROM_WIN32( dwLastError );
-	}
-
 	// Put the text on the clipboard
 	HRESULT hResult = E_FAIL;
 	GlobalUnlock( hGlobal );
-	EmptyClipboard( );
+	if (EmptyClipboard( )){
 #if defined (UNICODE)
-	const UINT uFormat = CF_UNICODETEXT;
+		const UINT uFormat = CF_UNICODETEXT;
 #else
-	const UINT uFormat = CF_TEXT;
+		const UINT uFormat = CF_TEXT;
 #endif
-	HANDLE hHandle = SetClipboardData( uFormat, hGlobal );
-	if (hHandle){
-		hResult = S_OK;
+		HANDLE hHandle = SetClipboardData( uFormat, hGlobal );
+		if (hHandle){
+			hResult = S_OK;
 
-		// The clipboard now owns the memory?
-		hGlobal = NULL;
-	}else{
+			// The clipboard now owns the memory?
+			hGlobal = NULL;
+		}else{
 #if defined (_DEBUG)
-		OutputDebugString( TEXT( "Copy failed? " ) );
+			OutputDebugString( TEXT( "Copy failed? " ) );
 
-		TCHAR szDebug[MAX_PATH] = { 0 };
-		StringCchPrintf( szDebug, MAX_PATH, TEXT( "(%u)\x0A" ), GetLastError( ) );
-		OutputDebugString( szDebug );
+			TCHAR szDebug[MAX_PATH] = { 0 };
+			StringCchPrintf( szDebug, MAX_PATH, TEXT( "(%u)\x0A" ), GetLastError( ) );
+			OutputDebugString( szDebug );
 #endif
+			hResult = HRESULT_FROM_WIN32( GetLastError( ) );
+		}
+	}else{
 		hResult = HRESULT_FROM_WIN32( GetLastError( ) );
 	}
 

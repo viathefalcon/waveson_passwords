@@ -28,12 +28,13 @@ LPTSTR LoadStringProcessHeap(HINSTANCE hInstance, UINT uID) {
 	}
 
 	// Allocate a null-terminated buffer and copy into it
-	LPTSTR pszText = static_cast<LPTSTR>( PH_ALLOC( sizeof( TCHAR ) * (nLength+1) ) );
-	StringCchCopy( pszText, (nLength + 1), pszTmp );
+	const auto cchLength = static_cast<size_t>( nLength + 1 );
+	LPTSTR pszText = static_cast<LPTSTR>( PH_ALLOC( sizeof( TCHAR ) * cchLength ) );
+	StringCchCopy( pszText, cchLength, pszTmp );
 	return pszText;
 }
 
-VOID SetAboutStringMaybe(HWND hDlg, int nItem, UINT uString) {
+static VOID SetAboutStringMaybe(HWND hDlg, int nItem, UINT uString) {
 
 	if (uString > 0){
 		HINSTANCE hInstance = reinterpret_cast<HINSTANCE>( GetWindowLongPtr( hDlg, GWLP_HINSTANCE ) );
@@ -45,7 +46,7 @@ VOID SetAboutStringMaybe(HWND hDlg, int nItem, UINT uString) {
 	}
 }
 
-VOID CenterSysLink(HWND hWnd, LONG lWidth) {
+static VOID CenterSysLink(HWND hWnd, LONG lWidth) {
 
 	// Get the current window rectangle
 	RECT r = { 0 };
@@ -68,7 +69,7 @@ VOID CenterSysLink(HWND hWnd, LONG lWidth) {
 	MoveWindow( hWnd, x, p.y, s.cx, s.cy, TRUE );
 }
 
-BOOL OnInitAboutDialog(HWND hDlg, WPARAM WParam, LPARAM lParam) {
+static BOOL OnInitAboutDialog(HWND hDlg, WPARAM WParam, LPARAM lParam) {
 
 	// Use one of the pre-set labels as an anchor
 	RECT r = { 0 };
