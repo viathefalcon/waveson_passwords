@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 48 48" fill="none" role="img" aria-labelledby="title description">
+  <title id="title">Waveson Password Generator</title>
+  <desc id="description">An indigo frame resting flush on an orange wave, with a pale keyhole and warm creation glint centered together inside the frame to represent password generation.</desc>
+  <defs>
+    <linearGradient id="rim" x1="9" y1="10" x2="36" y2="36" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#CCCCFF"/>
+      <stop offset="1" stop-color="#333399"/>
+    </linearGradient>
+    <linearGradient id="output" x1="12" y1="13" x2="30" y2="35" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#333399"/>
+      <stop offset="1" stop-color="#000066"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="21" y1="27" x2="29" y2="43" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFCC99"/>
+      <stop offset="0.45" stop-color="#FF9933"/>
+      <stop offset="1" stop-color="#FF9900"/>
+    </linearGradient>
+    <linearGradient id="keyhole" x1="21" y1="15" x2="27" y2="26" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#CCCCFF"/>
+    </linearGradient>
+    <linearGradient id="glint" x1="25" y1="18" x2="31" y2="28" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFCC"/>
+      <stop offset="1" stop-color="#FF9933"/>
+    </linearGradient>
+    <clipPath id="output-face">
+      <rect x="5.5" y="12" width="37" height="22" rx="0.893264"/>
+    </clipPath>
+    <clipPath id="above-wave">
+      <path d="M4 0H44V31.5C39.1 36.2 33.9 35.7 33.9 32.3C33.9 29.7 37.2 28.4 40.8 30C40.1 28.5 38.7 27.2 36.8 26.4C32.5 24.6 28.6 26.1 23.4 30.1C17.9 34.3 11 36.3 4 31.5Z"/>
+    </clipPath>
+    <filter id="wave-shadow" x="1" y="23" width="46" height="23" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="0.5"/>
+    </filter>
+    <filter id="keyhole-shadow" x="18" y="13" width="12" height="16" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="0.35"/>
+    </filter>
+  </defs>
+  <!-- Fits the silhouette to the 48 x 36 landscape keyline (y = 6 to 42) of the Windows 48-unit icon grid -->
+  <g id="artwork" transform="translate(24 24) scale(1.11949) translate(-24 -26.578758)">
+  <g clip-path="url(#above-wave)">
+    <!-- Corner radii are pre-divided by the artwork scale: 2 units outside and 1 unit inside on the 48-unit grid -->
+    <rect x="4" y="10.5" width="40" height="25" rx="1.786528" fill="url(#rim)"/>
+    <rect x="5.5" y="12" width="37" height="22" rx="0.893264" fill="url(#output)"/>
+    <g id="symbols" transform="translate(24 23) scale(1.4856075) translate(-24.000004 -22.996717)">
+      <g transform="translate(-6 2.45)">
+        <path fill="#000066" fill-opacity="0.5" filter="url(#keyhole-shadow)" transform="translate(0 0.5)" d="M27.25 18.25A3.25 3.25 0 1 0 22.45 21.1L21.45 25.4C21.37 25.75 21.64 26.1 22 26.1H26C26.36 26.1 26.63 25.75 26.55 25.4L25.55 21.1A3.25 3.25 0 0 0 27.25 18.25Z"/>
+        <path id="keyhole-face" fill="url(#keyhole)" d="M27.25 18.25A3.25 3.25 0 1 0 22.45 21.1L21.45 25.4C21.37 25.75 21.64 26.1 22 26.1H26C26.36 26.1 26.63 25.75 26.55 25.4L25.55 21.1A3.25 3.25 0 0 0 27.25 18.25Z"/>
+      </g>
+      <path id="glint-face" fill="url(#glint)" d="M28.25 18L29.625 21.625L33.25 23L29.625 24.375L28.25 28L26.875 24.375L23.25 23L26.875 21.625Z"/>
+    </g>
+    <g clip-path="url(#output-face)">
+      <path fill="#000066" fill-opacity="0.4" filter="url(#wave-shadow)" transform="translate(0 -0.5)" d="M4 31.5C11 36.3 17.9 34.3 23.4 30.1C28.6 26.1 32.5 24.6 36.8 26.4C38.7 27.2 40.1 28.5 40.8 30C37.2 28.4 33.9 29.7 33.9 32.3C33.9 35.7 39.1 36.2 44 31.5C39.2 40.5 30.1 44 20.4 42.2C12.8 40.8 7 37.7 4 31.5Z"/>
+    </g>
+  </g>
+  <path id="wave-face" fill="url(#wave)" d="M4 31.5C11 36.3 17.9 34.3 23.4 30.1C28.6 26.1 32.5 24.6 36.8 26.4C38.7 27.2 40.1 28.5 40.8 30C37.2 28.4 33.9 29.7 33.9 32.3C33.9 35.7 39.1 36.2 44 31.5C39.2 40.5 30.1 44 20.4 42.2C12.8 40.8 7 37.7 4 31.5Z"/>
+    </g>
+  </svg>
