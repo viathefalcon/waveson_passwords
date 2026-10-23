@@ -64,7 +64,7 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <Image Include="Waveson.ico">
+    <Image Include="WPG.ico">
       <Filter>Resource Files</Filter>
     </Image>
     <Image Include="Waveson.bmp">

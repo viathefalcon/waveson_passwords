@@ -269,7 +269,7 @@
   </ItemGroup>
   <ItemGroup>
     <Image Include="Waveson.bmp" />
-    <Image Include="Waveson.ico" />
+    <Image Include="WPG.ico" />
   </ItemGroup>
   <ItemGroup>
     <Manifest Include="WPG.manifest">
