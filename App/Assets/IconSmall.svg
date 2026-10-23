@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none" role="img" aria-labelledby="title description">
+  <title id="title">Waveson Password Generator</title>
+  <desc id="description">Pixel-snapped small version of the icon: an indigo frame on an orange wave, with a pale keyhole and warm glint inside the frame.</desc>
+  <!-- Drawn on the 16 px grid; every edge except the outer corners lies on a whole pixel -->
+  <rect x="0" y="2" width="16" height="9" rx="1" fill="#6666CC"/>
+  <rect x="1" y="3" width="14" height="8" fill="#1A1A80"/>
+  <path id="keyhole" fill="#FFFFFF" d="M4 4H6V5H7V7H6V10H4V7H3V5H4Z"/>
+  <!-- Partial corner pixels round the head so it doesn't read as a cross -->
+  <path fill="#FFFFFF" fill-opacity="0.4" d="M3 4H4V5H3ZM6 4H7V5H6ZM3 7H4V8H3ZM6 7H7V8H6Z"/>
+  <path id="glint" fill="#FFCC66" d="M10 4H11V5H12V6H11V7H10V6H9V5H10Z"/>
+  <rect x="10" y="5" width="1" height="1" fill="#FFFFCC"/>
+  <!-- One row per subpath; the crest's tip at x = 13 hooks over an L-shaped pocket that opens to the right -->
+  <path id="wave" fill="#FF9933" d="M10 8H14V9H10ZM8 9H12V10H8ZM13 9H14V10H13ZM0 10H2V11H0ZM6 10H12V11H6ZM14 10H16V11H14ZM0 11H16V12H0ZM1 12H15V13H1ZM3 13H12V14H3Z"/>
+</svg>
